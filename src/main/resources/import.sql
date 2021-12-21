@@ -1,0 +1,2 @@
+INSERT INTO appuser (id, username, email, firstname, lastname, biography, creationdate, isactive)
+VALUES (nextval('hibernate_sequence'), 'arturfigueira', 'artur.figueira@email.com', 'Artur', 'Figueira', 'Just a Nerd', '2021-11-20 00:00:00.000', true);
