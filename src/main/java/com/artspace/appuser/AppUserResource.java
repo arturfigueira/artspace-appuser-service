@@ -38,10 +38,10 @@ class AppUserResource {
     var user = appUserService.getUserByUserName(username);
 
     if (user.isPresent()) {
-      logger.debugf("Found user {}", user.get());
+      logger.tracef("Found user %s", user.get());
       return Response.ok(user.get()).build();
     } else {
-      logger.debugf("User not found with username {}", username);
+      logger.tracef("User not found with username %s", username);
       return Response.noContent().build();
     }
   }
