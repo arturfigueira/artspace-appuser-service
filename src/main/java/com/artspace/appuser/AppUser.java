@@ -5,11 +5,15 @@ import javax.persistence.Column;
 import javax.persistence.Entity;
 import javax.persistence.GeneratedValue;
 import javax.persistence.Id;
+import javax.validation.constraints.Email;
 import javax.validation.constraints.NotNull;
 import javax.validation.constraints.Size;
+import lombok.AccessLevel;
+import lombok.AllArgsConstructor;
 import lombok.Data;
 import lombok.NoArgsConstructor;
 import lombok.ToString;
+import lombok.With;
 import org.eclipse.microprofile.openapi.annotations.media.Schema;
 
 /**
@@ -26,11 +30,11 @@ import org.eclipse.microprofile.openapi.annotations.media.Schema;
 @Data
 @ToString
 @NoArgsConstructor
+@AllArgsConstructor(access = AccessLevel.PRIVATE)
+@With(AccessLevel.PROTECTED)
 class AppUser {
 
-  @Id
-  @GeneratedValue
-  private Long id;
+  @Id @GeneratedValue private Long id;
 
   @NotNull
   @Column(unique = true)
@@ -39,6 +43,7 @@ class AppUser {
 
   @NotNull
   @Column(unique = true)
+  @Email
   private String email;
 
   @NotNull
@@ -53,4 +58,18 @@ class AppUser {
   @NotNull private Instant creationDate = Instant.now();
 
   @NotNull private boolean isActive = true;
+
+  /**
+   * Clones the current instance into a new instance of {@link AppUser} where this new instance will
+   * be set with being created at this exact instant in time.
+   *
+   * @return A new instance of the current object with creationDate set to {@code Instant.now()}.
+   */
+  public AppUser toToday() {
+    return this.withCreationDate(Instant.now());
+  }
+
+  public void enableIt() {
+    this.isActive = true;
+  }
 }

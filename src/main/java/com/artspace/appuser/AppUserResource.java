@@ -2,9 +2,16 @@ package com.artspace.appuser;
 
 import static javax.ws.rs.core.MediaType.APPLICATION_JSON;
 
+import java.net.URI;
+import java.util.Optional;
+import javax.validation.Valid;
+import javax.validation.constraints.NotNull;
 import javax.ws.rs.GET;
+import javax.ws.rs.POST;
 import javax.ws.rs.Path;
+import javax.ws.rs.core.Context;
 import javax.ws.rs.core.Response;
+import javax.ws.rs.core.UriInfo;
 import lombok.AllArgsConstructor;
 import org.eclipse.microprofile.faulttolerance.Bulkhead;
 import org.eclipse.microprofile.faulttolerance.Timeout;
@@ -34,7 +41,7 @@ class AppUserResource {
       content =
           @Content(mediaType = APPLICATION_JSON, schema = @Schema(implementation = AppUser.class)))
   @APIResponse(responseCode = "204", description = "The app user is not found for a given username")
-  public Response getUser(@RestPath String username) {
+  public Response getAppUser(@RestPath String username) {
     var user = appUserService.getUserByUserName(username);
 
     if (user.isPresent()) {
@@ -44,5 +51,24 @@ class AppUserResource {
       logger.tracef("User not found with username %s", username);
       return Response.noContent().build();
     }
+  }
+
+  @Operation(summary = "Creates a valid AppUser")
+  @POST
+  @Timeout()
+  @Bulkhead()
+  @APIResponse(
+      responseCode = "201",
+      description = "The URI of the created AppUser",
+      content =
+          @Content(mediaType = APPLICATION_JSON, schema = @Schema(implementation = URI.class)))
+  @APIResponse(
+      responseCode = "422",
+      description = "The AppUser entity was not able to be persisted due to a conflict")
+  public Response createAppUser(@Valid @NotNull AppUser appUser, @Context UriInfo uriInfo) {
+    var persistedUser = appUserService.persistAppUser(appUser);
+    var builder = uriInfo.getAbsolutePathBuilder().path(persistedUser.getUsername());
+    logger.debugf("New AppUser created with URI %s", builder.build().toString());
+    return Response.created(builder.build()).build();
   }
 }

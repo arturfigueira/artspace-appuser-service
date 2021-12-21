@@ -1,6 +1,7 @@
 package com.artspace.appuser;
 
 import io.quarkus.hibernate.orm.panache.PanacheRepository;
+import java.util.List;
 import java.util.Optional;
 
 /**
@@ -24,4 +25,13 @@ interface AppUserRepository extends PanacheRepository<AppUser> {
    * @return an optional with found user or empty otherwise
    */
   Optional<AppUser> findByUserName(String username);
+
+
+  /**
+   * Search for  {@link AppUser} that has either the specified username or the email
+   * @param username of the element to be searched for
+   * @param email of the element to be searched for
+   * @return a list with all users that matches specified arguments
+   */
+  List<AppUser> findByUserNameOrEmail(String username, String email);
 }
