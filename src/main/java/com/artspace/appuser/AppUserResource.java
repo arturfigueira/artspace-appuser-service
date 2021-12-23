@@ -8,6 +8,7 @@ import javax.validation.Valid;
 import javax.validation.constraints.NotNull;
 import javax.ws.rs.GET;
 import javax.ws.rs.POST;
+import javax.ws.rs.PUT;
 import javax.ws.rs.Path;
 import javax.ws.rs.core.Context;
 import javax.ws.rs.core.Response;
@@ -70,5 +71,26 @@ class AppUserResource {
     var builder = uriInfo.getAbsolutePathBuilder().path(persistedUser.getUsername());
     logger.debugf("New AppUser created with URI %s", builder.build().toString());
     return Response.created(builder.build()).build();
+  }
+
+  @Operation(summary = "Disable a AppUser")
+  @PUT
+  @Path("/{username}/disable")
+  @Timeout()
+  @APIResponse(responseCode = "200", description = "AppUser successfully disabled")
+  @APIResponse(
+      responseCode = "204",
+      description = "No AppUser found for the given identifier")
+  public Response disableAppUser(@RestPath String username) {
+    Optional<String> disableUser = this.appUserService.disableUser(username);
+
+    if(disableUser.isPresent()) {
+      logger.debugf("AppUser %s successfully disabled", username);
+      return Response.ok().build();
+    }else {
+      logger.debugf("AppUser %s not disable due to being not found", username);
+      return Response.noContent().build();
+    }
+
   }
 }

@@ -14,7 +14,6 @@ import java.util.Collections;
 import java.util.List;
 import java.util.Locale;
 import java.util.Optional;
-import javax.inject.Inject;
 import org.jboss.logging.Logger;
 import org.junit.jupiter.api.Assertions;
 import org.junit.jupiter.api.BeforeEach;
@@ -152,6 +151,31 @@ class AppUserServiceTest {
           // when
           this.appUserService.persistAppUser(copy);
         });
+  }
+
+  @Test
+  @DisplayName("Disable user will return an empty optional if user is not found")
+  void disableUserWillReturnEmptyIfUserNotFound() {
+    // when
+    when(this.appUserRepo.findByUserName(anyString())).thenReturn(Optional.empty());
+
+    // then
+    var output = this.appUserService.disableUser("johndoe");
+
+    // then
+    assertThat(output, is(Optional.empty()));
+  }
+
+  @ParameterizedTest
+  @DisplayName("Disable user will ignore if the username is invalid {}")
+  @NullAndEmptySource
+  @ValueSource(strings = "   ")
+  void disableUserWillIgnoreIfInputIsInvalid(String input) {
+    // then
+    var output = this.appUserService.disableUser(input);
+
+    // then
+    assertThat(output, is(Optional.empty()));
   }
 
   private AppUser provideSampleUser() {

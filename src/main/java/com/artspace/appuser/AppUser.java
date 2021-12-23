@@ -72,4 +72,8 @@ class AppUser {
   public void enableIt() {
     this.isActive = true;
   }
+
+  public void toggleActive() {
+    this.isActive = !this.isActive;
+  }
 }

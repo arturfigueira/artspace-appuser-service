@@ -146,11 +146,7 @@ class AppUserResourceTest {
   @Test
   @DisplayName("An AppUser should not be persisted twice")
   void createAppUserShouldNotPersistTwiceSameEntity() {
-    var appUser = new AppUser();
-    appUser.setUsername(FAKER.name().username());
-    appUser.setFirstName(FAKER.name().firstName());
-    appUser.setLastName(FAKER.name().lastName());
-    appUser.setEmail(appUser.getUsername()+"@fake-mail.com");
+    AppUser appUser = generateSampleUser();
 
     given()
         .header(CONTENT_TYPE, JSON)
@@ -169,5 +165,45 @@ class AppUserResourceTest {
         .post("/api/appusers")
         .then()
         .statusCode(UNPROCESSABLE_ENTITY.getStatusCode());
+  }
+
+  private AppUser generateSampleUser() {
+    var appUser = new AppUser();
+    appUser.setUsername(FAKER.name().username());
+    appUser.setFirstName(FAKER.name().firstName());
+    appUser.setLastName(FAKER.name().lastName());
+    appUser.setEmail(appUser.getUsername() + "@fake-mail.com");
+    return appUser;
+  }
+
+  @Test
+  @DisplayName("Disable user should effectively disable required user")
+  void shouldDisableAppUser() {
+    // Given
+    var appUser = this.userService.persistAppUser(generateSampleUser());
+    ;
+    // when
+    given()
+        .pathParam("username", appUser.getUsername())
+        .when()
+        .put("/api/appusers/{username}/disable")
+        .then()
+        .statusCode(OK.getStatusCode());
+
+    // then
+    given()
+        .pathParam("username", appUser.getUsername())
+        .when()
+        .get("/api/appusers/{username}")
+        .then()
+        .statusCode(OK.getStatusCode())
+        .header(CONTENT_TYPE, JSON)
+        .body("active", Is.is(false))
+        .body("id", Is.is(appUser.getId().intValue()))
+        .body("username", Is.is(appUser.getUsername()))
+        .body("firstName", Is.is(appUser.getFirstName()))
+        .body("lastName", Is.is(appUser.getLastName()))
+        .body("email", Is.is(appUser.getEmail()))
+        .body("biography", Is.is(appUser.getBiography()));
   }
 }
