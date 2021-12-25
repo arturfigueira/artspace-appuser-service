@@ -87,6 +87,34 @@ class AppUserService {
     return appUser;
   }
 
+  /**
+   * Updates the given {@link AppUser}. Not all attributes will be updated. Id, username, creation
+   * date and isActive won't be updated via this method. The former three are constants, and It's
+   * important to not update them, as it is used by the entire application as a data bound.
+   *
+   * Disable a appUser can be achieved with {@link  #disableUser(String)}}
+   *
+   * @param inputAppUser instance with the updated data
+   * @throws javax.validation.ConstraintViolationException if given user contains any invalid data
+   * @throws NullPointerException If specified user is null
+   * @return An optional with the updated AppUser data or empty if the user was not found.
+   */
+  public Optional<AppUser> updateAppUser(final @Valid @NotNull AppUser inputAppUser) {
+    final var byUserName = this.appUserRepo.findByUserName(inputAppUser.getUsername());
+
+    if (byUserName.isPresent()) {
+      final var entity = byUserName.get();
+      this.normalizeData(inputAppUser);
+      entity.setEmail(inputAppUser.getEmail());
+      entity.setFirstName(inputAppUser.getFirstName());
+      entity.setLastName(inputAppUser.getLastName());
+      entity.setBiography(inputAppUser.getBiography());
+      logger.debugf("User successfully updated: %s", entity);
+    }
+
+    return byUserName;
+  }
+
   private void normalizeData(AppUser appUser) {
     appUser.enableIt();
     appUser.setEmail(appUser.getEmail().toLowerCase().trim());
