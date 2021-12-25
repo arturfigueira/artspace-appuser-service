@@ -1,5 +1,7 @@
 package com.artspace.appuser;
 
+import static javax.transaction.Transactional.TxType.SUPPORTS;
+
 import java.util.HashSet;
 import java.util.Optional;
 import javax.enterprise.context.ApplicationScoped;
@@ -30,6 +32,7 @@ class AppUserService {
    * @param id long value that represents the unique identifier of the required user
    * @return An {@code Optional<User>} if its found, or {@code Optional.empty()} otherwise
    */
+  @Transactional(SUPPORTS)
   public Optional<AppUser> getUserById(final long id) {
     return appUserRepo.findByIdOptional(id);
   }
@@ -40,10 +43,29 @@ class AppUserService {
    * @param userName Non-null, nor empty, username of the required User
    * @return An {@code Optional<User>} if its found, or {@code Optional.empty()} otherwise
    */
+  @Transactional(SUPPORTS)
   public Optional<AppUser> getUserByUserName(String userName) {
     return Optional.ofNullable(userName)
         .filter(value -> !value.isBlank())
         .flatMap(appUserRepo::findByUserName);
+  }
+
+  /**
+   * Disable a specific user by its username. If the user is already disable nothing will occur. At
+   * the end of the action the username of the user will be returned as proof that the action
+   * worked, an empty optional will be returned in case of a non-existent user
+   *
+   * @param userName Non-null, nor empty, username of the required User to be disabled
+   * @return Optional with the username or empty optional if the user was not found
+   */
+  public Optional<String> disableUser(String userName) {
+    final var userOptional = this.getUserByUserName(userName);
+
+    if (userOptional.isPresent() && userOptional.get().isActive()) {
+      userOptional.get().toggleActive();
+    }
+
+    return userOptional.map(AppUser::getUsername);
   }
 
   /**
