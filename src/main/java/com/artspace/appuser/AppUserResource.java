@@ -73,24 +73,38 @@ class AppUserResource {
     return Response.created(builder.build()).build();
   }
 
+  @Operation(summary = "Updates an existing AppUser")
+  @PUT
+  @Timeout()
+  @APIResponse(responseCode = "200", description = "AppUser successfully updated")
+  @APIResponse(responseCode = "204", description = "No AppUser found for the given identifier")
+  public Response updateAppUser(@Valid @NotNull AppUser toBeUpdated) {
+    final var updatedUser = this.appUserService.updateAppUser(toBeUpdated);
+    if (updatedUser.isPresent()) {
+      final var entity = updatedUser.get();
+      logger.debugf("AppUser %s successfully updated", entity.getUsername());
+      return Response.ok(entity).build();
+    } else {
+      logger.debugf("AppUser %s not disable due to being not found", toBeUpdated.getUsername());
+      return Response.noContent().build();
+    }
+  }
+
   @Operation(summary = "Disable a AppUser")
   @PUT
   @Path("/{username}/disable")
   @Timeout()
   @APIResponse(responseCode = "200", description = "AppUser successfully disabled")
-  @APIResponse(
-      responseCode = "204",
-      description = "No AppUser found for the given identifier")
+  @APIResponse(responseCode = "204", description = "No AppUser found for the given identifier")
   public Response disableAppUser(@RestPath String username) {
     Optional<String> disableUser = this.appUserService.disableUser(username);
 
-    if(disableUser.isPresent()) {
+    if (disableUser.isPresent()) {
       logger.debugf("AppUser %s successfully disabled", username);
       return Response.ok().build();
-    }else {
+    } else {
       logger.debugf("AppUser %s not disable due to being not found", username);
       return Response.noContent().build();
     }
-
   }
 }

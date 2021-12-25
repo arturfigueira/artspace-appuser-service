@@ -10,6 +10,9 @@ import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 import com.github.javafaker.Faker;
+import java.time.Instant;
+import java.time.temporal.ChronoUnit;
+import java.time.temporal.TemporalUnit;
 import java.util.Collections;
 import java.util.List;
 import java.util.Locale;
@@ -176,6 +179,54 @@ class AppUserServiceTest {
 
     // then
     assertThat(output, is(Optional.empty()));
+  }
+
+
+  @Test
+  @DisplayName("Update user should return an empty optional if user is not found")
+  void updateUserShouldReturnEmptyIfUserNotFound() {
+    //given
+    when(this.appUserRepo.findByUserName(anyString())).thenReturn(Optional.empty());
+
+    // when
+    var output = this.appUserService.updateAppUser(provideSampleUser());
+
+    // then
+    assertThat(output, is(Optional.empty()));
+  }
+
+  @Test
+  @DisplayName("Update user should not change data that are considered constant")
+  void updateUserShouldNotUpdateConstantData() {
+    //given
+    var repoUser = provideSampleUser();
+    repoUser.setId(1000L);
+    var fiveDaysAgo = Instant.now().minus(5, ChronoUnit.DAYS);
+    repoUser.setCreationDate(fiveDaysAgo);
+    when(this.appUserRepo.findByUserName(anyString())).thenReturn(Optional.of(repoUser));
+
+    final var sampleUser = repoUser.withFirstName("John");
+    sampleUser.setLastName("McN'Cheese");
+    sampleUser.setUsername("nonono");
+    sampleUser.setEmail("john.mcc@acme.com");
+    sampleUser.setBiography("Just an old man");
+    sampleUser.toggleActive();
+    sampleUser.toToday();
+    sampleUser.setId(2000L);
+
+    // when
+    var output = this.appUserService.updateAppUser(sampleUser);
+
+    // then
+    AppUser outputUser = output.get();
+    assertThat(outputUser.getCreationDate(), is(fiveDaysAgo));
+    assertThat(outputUser.getId(), is(repoUser.getId()));
+    assertThat(outputUser.getUsername(), is(repoUser.getUsername()));
+    assertTrue(outputUser.isActive());
+
+    assertThat(outputUser.getFirstName(), is(sampleUser.getFirstName()));
+    assertThat(outputUser.getLastName(), is(sampleUser.getLastName()));
+    assertThat(outputUser.getBiography(), is(sampleUser.getBiography()));
   }
 
   private AppUser provideSampleUser() {

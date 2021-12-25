@@ -7,6 +7,7 @@ import static javax.ws.rs.core.HttpHeaders.CONTENT_TYPE;
 import static javax.ws.rs.core.MediaType.APPLICATION_JSON;
 import static javax.ws.rs.core.Response.Status.BAD_REQUEST;
 import static javax.ws.rs.core.Response.Status.CREATED;
+import static javax.ws.rs.core.Response.Status.NO_CONTENT;
 import static javax.ws.rs.core.Response.Status.OK;
 import static org.hamcrest.CoreMatchers.endsWith;
 import static org.hamcrest.CoreMatchers.notNullValue;
@@ -167,21 +168,12 @@ class AppUserResourceTest {
         .statusCode(UNPROCESSABLE_ENTITY.getStatusCode());
   }
 
-  private AppUser generateSampleUser() {
-    var appUser = new AppUser();
-    appUser.setUsername(FAKER.name().username());
-    appUser.setFirstName(FAKER.name().firstName());
-    appUser.setLastName(FAKER.name().lastName());
-    appUser.setEmail(appUser.getUsername() + "@fake-mail.com");
-    return appUser;
-  }
-
   @Test
   @DisplayName("Disable user should effectively disable required user")
   void shouldDisableAppUser() {
     // Given
     var appUser = this.userService.persistAppUser(generateSampleUser());
-    ;
+
     // when
     given()
         .pathParam("username", appUser.getUsername())
@@ -205,5 +197,87 @@ class AppUserResourceTest {
         .body("lastName", Is.is(appUser.getLastName()))
         .body("email", Is.is(appUser.getEmail()))
         .body("biography", Is.is(appUser.getBiography()));
+  }
+
+  @Test
+  @DisplayName("A AppUser should be able to be updated")
+  void shouldUpdateAppUser() {
+    var appUser = new AppUser();
+    appUser.setUsername("jakedoe");
+    appUser.setFirstName("Jak");
+    appUser.setLastName("Doe");
+    appUser.setEmail("jakedoe@acme.com");
+
+    given()
+        .header(CONTENT_TYPE, JSON)
+        .header(ACCEPT, JSON)
+        .body(appUser)
+        .when()
+        .post("/api/appusers")
+        .then()
+        .statusCode(CREATED.getStatusCode());
+
+    appUser.setFirstName("Jake");
+    appUser.setLastName("Doe The Second");
+    appUser.setEmail("jake-doe@acme.com");
+    appUser.setBiography("Just a sample user");
+
+    given()
+        .when()
+        .header(CONTENT_TYPE, JSON)
+        .header(ACCEPT, JSON)
+        .body(appUser)
+        .put("/api/appusers")
+        .then()
+        .statusCode(OK.getStatusCode())
+        .header(CONTENT_TYPE, JSON)
+        .body("id", notNullValue())
+        .body("username", Is.is("jakedoe"))
+        .body("firstName", Is.is("Jake"))
+        .body("active", Is.is(true))
+        .body("email", Is.is("jake-doe@acme.com"))
+        .body("biography", Is.is("Just a sample user"))
+        .body("lastName", Is.is("Doe The Second"));
+  }
+
+  @Test
+  @DisplayName("An update should return no content when user does not exists")
+  void shouldReturnNotContentWhenUserDoesNotExists() {
+    var appUser = this.generateSampleUser();
+
+    given()
+        .when()
+        .header(CONTENT_TYPE, JSON)
+        .header(ACCEPT, JSON)
+        .body(appUser)
+        .put("/api/appusers")
+        .then()
+        .statusCode(NO_CONTENT.getStatusCode());
+  }
+
+  @Test
+  @DisplayName("An invalid AppUser should not be updated")
+  void updateAppUserShouldNotPersistInvalid() {
+    var appUser = this.generateSampleUser();
+    appUser.setFirstName("");
+    appUser.setEmail("abc");
+
+    given()
+        .header(CONTENT_TYPE, JSON)
+        .header(ACCEPT, JSON)
+        .body(appUser)
+        .when()
+        .put("/api/appusers")
+        .then()
+        .statusCode(BAD_REQUEST.getStatusCode());
+  }
+
+  private AppUser generateSampleUser() {
+    var appUser = new AppUser();
+    appUser.setUsername(FAKER.name().username());
+    appUser.setFirstName(FAKER.name().firstName());
+    appUser.setLastName(FAKER.name().lastName());
+    appUser.setEmail(appUser.getUsername() + "@fake-mail.com");
+    return appUser;
   }
 }
