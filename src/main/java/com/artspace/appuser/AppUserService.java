@@ -1,10 +1,11 @@
 package com.artspace.appuser;
 
-import static javax.transaction.Transactional.TxType.SUPPORTS;
-
+import io.quarkus.hibernate.reactive.panache.common.runtime.ReactiveTransactional;
+import io.smallrye.mutiny.Uni;
 import java.util.HashSet;
 import java.util.Optional;
 import javax.enterprise.context.ApplicationScoped;
+import javax.persistence.NoResultException;
 import javax.transaction.Transactional;
 import javax.transaction.Transactional.TxType;
 import javax.validation.Valid;
@@ -18,8 +19,8 @@ import org.jboss.logging.Logger;
  * @since 1.0.0
  */
 @ApplicationScoped
-@Transactional(TxType.REQUIRED)
 @AllArgsConstructor
+@ReactiveTransactional
 class AppUserService {
 
   final AppUserRepository appUserRepo;
@@ -30,24 +31,35 @@ class AppUserService {
    * Searches for a {@link AppUser} by its unique identifier.
    *
    * @param id long value that represents the unique identifier of the required user
-   * @return An {@code Optional<User>} if its found, or {@code Optional.empty()} otherwise
+   * @return An {@link Uni} that will resolve into an Optional with found user or empty otherwise
    */
-  @Transactional(SUPPORTS)
-  public Optional<AppUser> getUserById(final long id) {
-    return appUserRepo.findByIdOptional(id);
+  @Transactional(TxType.SUPPORTS)
+  public Uni<Optional<AppUser>> getUserById(final long id) {
+    return appUserRepo
+        .findById(id)
+        .map(Optional::of)
+        .onFailure(NoResultException.class)
+        .recoverWithItem(Optional.empty());
   }
 
   /**
    * Searches for a {@link AppUser} by its unique username
    *
    * @param userName Non-null, nor empty, username of the required User
-   * @return An {@code Optional<User>} if its found, or {@code Optional.empty()} otherwise
+   * @return An {@link Uni} that will resolve into an Optional with found user or empty otherwise
    */
-  @Transactional(SUPPORTS)
-  public Optional<AppUser> getUserByUserName(String userName) {
+  @Transactional(TxType.SUPPORTS)
+  public Uni<Optional<AppUser>> getUserByUserName(String userName) {
     return Optional.ofNullable(userName)
         .filter(value -> !value.isBlank())
-        .flatMap(appUserRepo::findByUserName);
+        .map(
+            un ->
+                this.appUserRepo
+                    .findByUserName(un)
+                    .map(Optional::of)
+                    .onFailure(NoResultException.class)
+                    .recoverWithItem(Optional.empty()))
+        .orElse(Uni.createFrom().item(Optional.empty()));
   }
 
   /**
@@ -56,16 +68,13 @@ class AppUserService {
    * worked, an empty optional will be returned in case of a non-existent user
    *
    * @param userName Non-null, nor empty, username of the required User to be disabled
-   * @return Optional with the username or empty optional if the user was not found
+   * @return {@link Uni} that will resolve into an Optional with the username of the disabled user,
+   *     an empty optional will be returned if no user was found
    */
-  public Optional<String> disableUser(String userName) {
-    final var userOptional = this.getUserByUserName(userName);
-
-    if (userOptional.isPresent() && userOptional.get().isActive()) {
-      userOptional.get().toggleActive();
-    }
-
-    return userOptional.map(AppUser::getUsername);
+  public Uni<Optional<String>> disableUser(String userName) {
+    return this.getUserByUserName(userName)
+        .invoke(appUser -> appUser.ifPresent(AppUser::toggleActive))
+        .map(appUser -> appUser.map(AppUser::getUsername));
   }
 
   /**
@@ -76,15 +85,14 @@ class AppUserService {
    * @throws UniquenessViolationException if Username or email are not unique
    * @throws javax.validation.ConstraintViolationException if given user contains any invalid data
    * @throws NullPointerException If inputAppUser is null
+   * @return An {@link Uni} that will be resolved into the persisted AppUser
    */
-  public AppUser persistAppUser(final @Valid @NotNull AppUser inputAppUser) {
+  public Uni<AppUser> persistAppUser(final @Valid @NotNull AppUser inputAppUser) {
     final var appUser = inputAppUser.toToday();
     this.normalizeData(appUser);
-    this.validateUniqueness(appUser);
-
-    appUserRepo.persist(appUser);
-    logger.debugf("User successfully persisted: %s", appUser);
-    return appUser;
+    return this.validateUniqueness(appUser)
+        .chain(appUserRepo::persist)
+        .invoke(entity -> logger.debugf("User successfully persisted: %s", entity));
   }
 
   /**
@@ -92,27 +100,29 @@ class AppUserService {
    * date and isActive won't be updated via this method. The former three are constants, and It's
    * important to not update them, as it is used by the entire application as a data bound.
    *
-   * Disable a appUser can be achieved with {@link  #disableUser(String)}}
+   * <p>Disable a appUser can be achieved with {@link #disableUser(String)}}
    *
    * @param inputAppUser instance with the updated data
    * @throws javax.validation.ConstraintViolationException if given user contains any invalid data
    * @throws NullPointerException If specified user is null
-   * @return An optional with the updated AppUser data or empty if the user was not found.
+   * @return An {@link Uni} that will resolve into an optional with the updated AppUser data or an
+   *     empty optional if the user was not found.
    */
-  public Optional<AppUser> updateAppUser(final @Valid @NotNull AppUser inputAppUser) {
-    final var byUserName = this.appUserRepo.findByUserName(inputAppUser.getUsername());
-
-    if (byUserName.isPresent()) {
-      final var entity = byUserName.get();
-      this.normalizeData(inputAppUser);
-      entity.setEmail(inputAppUser.getEmail());
-      entity.setFirstName(inputAppUser.getFirstName());
-      entity.setLastName(inputAppUser.getLastName());
-      entity.setBiography(inputAppUser.getBiography());
-      logger.debugf("User successfully updated: %s", entity);
-    }
-
-    return byUserName;
+  public Uni<Optional<AppUser>> updateAppUser(final @Valid @NotNull AppUser inputAppUser) {
+    return this.getUserByUserName(inputAppUser.getUsername())
+        .map(
+            userOptional -> {
+              if (userOptional.isPresent()) {
+                final var entity = userOptional.get();
+                this.normalizeData(inputAppUser);
+                entity.setEmail(inputAppUser.getEmail());
+                entity.setFirstName(inputAppUser.getFirstName());
+                entity.setLastName(inputAppUser.getLastName());
+                entity.setBiography(inputAppUser.getBiography());
+                logger.debugf("User successfully updated: %s", entity);
+              }
+              return userOptional;
+            });
   }
 
   private void normalizeData(AppUser appUser) {
@@ -121,22 +131,27 @@ class AppUserService {
     appUser.setUsername(appUser.getUsername().toLowerCase().trim());
   }
 
-  private void validateUniqueness(AppUser appUser) {
-    final var byUserNameOrEmail =
-        this.appUserRepo.findByUserNameOrEmail(appUser.getUsername(), appUser.getEmail());
+  private Uni<AppUser> validateUniqueness(AppUser appUser) {
+    return this.appUserRepo
+        .findByUserNameOrEmail(appUser.getUsername(), appUser.getEmail())
+        .map(
+            entities -> {
+              final var violations = new HashSet<UniquenessViolation>();
 
-    final var violations = new HashSet<UniquenessViolation>();
-    for (var user : byUserNameOrEmail) {
-      if (user.getUsername().equals(appUser.getUsername())) {
-        violations.add(new UniquenessViolation("username", "Username must be unique"));
-      }
+              for (var user : entities) {
+                if (user.getUsername().equals(appUser.getUsername())) {
+                  violations.add(new UniquenessViolation("username", "Username must be unique"));
+                }
 
-      if (user.getEmail().equals(appUser.getEmail())) {
-        violations.add(new UniquenessViolation("email", "E-mail must be unique"));
-      }
-    }
-    if (!violations.isEmpty()) {
-      throw new UniquenessViolationException(violations);
-    }
+                if (user.getEmail().equals(appUser.getEmail())) {
+                  violations.add(new UniquenessViolation("email", "E-mail must be unique"));
+                }
+              }
+              if (!violations.isEmpty()) {
+                throw new UniquenessViolationException(violations);
+              }
+
+              return appUser;
+            });
   }
 }

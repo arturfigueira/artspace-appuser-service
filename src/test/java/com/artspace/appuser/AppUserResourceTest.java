@@ -16,6 +16,7 @@ import static org.hamcrest.MatcherAssert.assertThat;
 
 import com.github.javafaker.Faker;
 import io.quarkus.test.junit.QuarkusTest;
+import java.time.Duration;
 import javax.inject.Inject;
 import org.hamcrest.core.Is;
 import org.junit.jupiter.api.BeforeAll;
@@ -34,6 +35,8 @@ class AppUserResourceTest {
   private static final String DEFAULT_USERNAME = "arturfigueira";
 
   private static Faker FAKER;
+
+  private static final Duration FIVE_SECONDS = Duration.ofSeconds(5);
 
   @Inject AppUserService userService;
 
@@ -54,14 +57,28 @@ class AppUserResourceTest {
   }
 
   @Test
-  @DisplayName("An existing user should be returned by its user name")
-  void shouldGetExistingAppUserByUserName() {
-
-    final var user = userService.getUserByUserName(DEFAULT_USERNAME).get();
+  @DisplayName("An empty response should be returned when user is not found")
+  void shouldReturnEmptyResponseWhenUserNotFound() {
 
     given()
         .when()
-        .get("/api/appusers/" + DEFAULT_USERNAME)
+        .pathParam("username", "not-one")
+        .get("/api/appusers/{username}")
+        .then()
+        .statusCode(NO_CONTENT.getStatusCode());
+  }
+
+  @Test
+  @DisplayName("An existing user should be returned by its user name")
+  void shouldGetExistingAppUserByUserName() {
+
+    final var user =
+        userService.getUserByUserName(DEFAULT_USERNAME).await().atMost(FIVE_SECONDS).get();
+
+    given()
+        .when()
+        .pathParam("username", DEFAULT_USERNAME)
+        .get("/api/appusers/{username}")
         .then()
         .statusCode(OK.getStatusCode())
         .header(CONTENT_TYPE, JSON)
@@ -172,7 +189,7 @@ class AppUserResourceTest {
   @DisplayName("Disable user should effectively disable required user")
   void shouldDisableAppUser() {
     // Given
-    var appUser = this.userService.persistAppUser(generateSampleUser());
+    var appUser = this.userService.persistAppUser(generateSampleUser()).await().atMost(FIVE_SECONDS);
 
     // when
     given()
