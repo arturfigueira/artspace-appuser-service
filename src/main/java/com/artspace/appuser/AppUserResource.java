@@ -2,8 +2,8 @@ package com.artspace.appuser;
 
 import static javax.ws.rs.core.MediaType.APPLICATION_JSON;
 
+import io.smallrye.mutiny.Uni;
 import java.net.URI;
-import java.util.Optional;
 import javax.validation.Valid;
 import javax.validation.constraints.NotNull;
 import javax.ws.rs.GET;
@@ -42,16 +42,26 @@ class AppUserResource {
       content =
           @Content(mediaType = APPLICATION_JSON, schema = @Schema(implementation = AppUser.class)))
   @APIResponse(responseCode = "204", description = "The app user is not found for a given username")
-  public Response getAppUser(@RestPath String username) {
-    var user = appUserService.getUserByUserName(username);
+  public Uni<Response> getAppUser(@RestPath String username) {
+    try{
+      var user = appUserService.getUserByUserName(username);
 
-    if (user.isPresent()) {
-      logger.tracef("Found user %s", user.get());
-      return Response.ok(user.get()).build();
-    } else {
-      logger.tracef("User not found with username %s", username);
-      return Response.noContent().build();
+      return user.map(
+          appUser -> {
+            var response = Response.noContent().build();
+            if (appUser.isPresent()) {
+              logger.tracef("Found user %s", appUser.get());
+              response = Response.ok(appUser.get()).build();
+            } else {
+              logger.tracef("User not found with username %s", username);
+            }
+
+            return response;
+          });
+    }catch (Exception e){
+      return null;
     }
+
   }
 
   @Operation(summary = "Creates a valid AppUser")
@@ -66,11 +76,14 @@ class AppUserResource {
   @APIResponse(
       responseCode = "422",
       description = "The AppUser entity was not able to be persisted due to a conflict")
-  public Response createAppUser(@Valid @NotNull AppUser appUser, @Context UriInfo uriInfo) {
+  public Uni<Response> createAppUser(@Valid @NotNull AppUser appUser, @Context UriInfo uriInfo) {
     var persistedUser = appUserService.persistAppUser(appUser);
-    var builder = uriInfo.getAbsolutePathBuilder().path(persistedUser.getUsername());
-    logger.debugf("New AppUser created with URI %s", builder.build().toString());
-    return Response.created(builder.build()).build();
+    return persistedUser.map(
+        entity -> {
+          var builder = uriInfo.getAbsolutePathBuilder().path(entity.getUsername());
+          logger.debugf("New AppUser created with URI %s", builder.build().toString());
+          return Response.created(builder.build()).build();
+        });
   }
 
   @Operation(summary = "Updates an existing AppUser")
@@ -78,16 +91,22 @@ class AppUserResource {
   @Timeout()
   @APIResponse(responseCode = "200", description = "AppUser successfully updated")
   @APIResponse(responseCode = "204", description = "No AppUser found for the given identifier")
-  public Response updateAppUser(@Valid @NotNull AppUser toBeUpdated) {
+  public Uni<Response> updateAppUser(@Valid @NotNull AppUser toBeUpdated) {
     final var updatedUser = this.appUserService.updateAppUser(toBeUpdated);
-    if (updatedUser.isPresent()) {
-      final var entity = updatedUser.get();
-      logger.debugf("AppUser %s successfully updated", entity.getUsername());
-      return Response.ok(entity).build();
-    } else {
-      logger.debugf("AppUser %s not disable due to being not found", toBeUpdated.getUsername());
-      return Response.noContent().build();
-    }
+    return updatedUser.map(
+        userOptional -> {
+          var response = Response.noContent().build();
+          if (userOptional.isPresent()) {
+            final var entity = userOptional.get();
+            logger.debugf("AppUser %s successfully updated", entity.getUsername());
+            response = Response.ok(entity).build();
+          } else {
+            logger.debugf(
+                "AppUser %s not disable due to being not found", toBeUpdated.getUsername());
+          }
+
+          return response;
+        });
   }
 
   @Operation(summary = "Disable a AppUser")
@@ -96,15 +115,20 @@ class AppUserResource {
   @Timeout()
   @APIResponse(responseCode = "200", description = "AppUser successfully disabled")
   @APIResponse(responseCode = "204", description = "No AppUser found for the given identifier")
-  public Response disableAppUser(@RestPath String username) {
-    Optional<String> disableUser = this.appUserService.disableUser(username);
+  public Uni<Response> disableAppUser(@RestPath String username) {
+    final var disabledUser = this.appUserService.disableUser(username);
 
-    if (disableUser.isPresent()) {
-      logger.debugf("AppUser %s successfully disabled", username);
-      return Response.ok().build();
-    } else {
-      logger.debugf("AppUser %s not disable due to being not found", username);
-      return Response.noContent().build();
-    }
+    return disabledUser.map(
+        userNameOptional -> {
+          var response = Response.noContent().build();
+          if (userNameOptional.isPresent()) {
+            logger.debugf("AppUser %s successfully disabled", userNameOptional.get());
+            response = Response.ok().build();
+          } else {
+            logger.debugf("AppUser %s not disable due to being not found", username);
+          }
+
+          return response;
+        });
   }
 }

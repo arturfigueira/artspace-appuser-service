@@ -5,18 +5,21 @@ import static org.hamcrest.CoreMatchers.notNullValue;
 import static org.hamcrest.CoreMatchers.nullValue;
 import static org.hamcrest.MatcherAssert.assertThat;
 import static org.junit.jupiter.api.Assertions.assertTrue;
+import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 import com.github.javafaker.Faker;
+import io.smallrye.mutiny.Uni;
+import java.time.Duration;
 import java.time.Instant;
 import java.time.temporal.ChronoUnit;
-import java.time.temporal.TemporalUnit;
 import java.util.Collections;
 import java.util.List;
 import java.util.Locale;
 import java.util.Optional;
+import javax.persistence.NoResultException;
 import org.jboss.logging.Logger;
 import org.junit.jupiter.api.Assertions;
 import org.junit.jupiter.api.BeforeEach;
@@ -44,6 +47,8 @@ class AppUserServiceTest {
 
   private static final Logger LOGGER = Logger.getLogger(AppUserService.class);
 
+  private static final Duration ONE_SEC = Duration.ofSeconds(1);
+
   @BeforeEach
   void setUp() {
     this.faker = new Faker(Locale.ENGLISH);
@@ -53,38 +58,42 @@ class AppUserServiceTest {
   @ParameterizedTest
   @ValueSource(strings = " ")
   @NullAndEmptySource
-  @DisplayName("An invalid username, such as {0}, should always return an empty optional")
+  @DisplayName("An invalid username, such as {0}, should always resolved into an empty optional")
   void getByUserNameReturnsEmptyWithInvalidArgs(String value) {
     // when
     var user = this.appUserService.getUserByUserName(value);
 
     // then
-    assertThat(user, is(Optional.empty()));
+    final var foundUser = user.await().atMost(ONE_SEC);
+    assertThat(foundUser, is(Optional.empty()));
   }
 
   @Test
-  @DisplayName("Empty should be returned when no user is found by userName")
+  @DisplayName("Empty should be resolved when no user is found by userName")
   void getByUserNameReturnsEmptyWhenNotFound() {
     // give
-    when(appUserRepo.findByUserName(Mockito.anyString())).thenReturn(Optional.empty());
+    when(appUserRepo.findByUserName(Mockito.anyString())).thenReturn(Uni.createFrom().failure(
+        NoResultException::new));
 
     // when
     var user = this.appUserService.getUserByUserName("jhondoe");
 
     // then
-    assertThat(user, is(Optional.empty()));
+    final var foundUser = user.await().atMost(ONE_SEC);
+    assertThat(foundUser, is(Optional.empty()));
   }
 
   @Test
-  @DisplayName("A user should be returned when its found by username")
+  @DisplayName("A user should be resolved when its found by username")
   void getByUserNameReturnsReturnsAnUser() {
     // give
     var user = this.provideSampleUser();
 
-    when(appUserRepo.findByUserName(Mockito.anyString())).thenReturn(Optional.of(user));
+    when(appUserRepo.findByUserName(Mockito.anyString())).thenReturn(Uni.createFrom().item(user));
 
     // when
-    var foundUser = this.appUserService.getUserByUserName(user.getUsername()).get();
+    var foundUser =
+        this.appUserService.getUserByUserName(user.getUsername()).await().atMost(ONE_SEC).get();
 
     // then
     assertThat(foundUser.getUsername(), is(user.getUsername()));
@@ -96,16 +105,17 @@ class AppUserServiceTest {
   }
 
   @Test
-  @DisplayName("Empty should be returned when no user is found by id")
+  @DisplayName("Empty optional should be resolved when no user is found by id")
   void getByIdReturnsEmptyWhenNotFound() {
     // give
-    when(appUserRepo.findByIdOptional(Mockito.anyLong())).thenReturn(Optional.empty());
-
+    when(appUserRepo.findById(Mockito.anyLong())).thenReturn(Uni.createFrom().failure(
+        NoResultException::new));
     // when
     var user = this.appUserService.getUserById(1L);
 
     // then
-    assertThat(user, is(Optional.empty()));
+    final var foundUser = user.await().atMost(ONE_SEC);
+    assertThat(foundUser, is(Optional.empty()));
   }
 
   @Test
@@ -119,10 +129,13 @@ class AppUserServiceTest {
     appUser.setCreationDate(null);
 
     when(this.appUserRepo.findByUserNameOrEmail(anyString(), anyString()))
-        .thenReturn(Collections.emptyList());
+        .thenReturn(Uni.createFrom().item(Collections.emptyList()));
+
+    when(this.appUserRepo.persist(any(AppUser.class)))
+        .thenReturn(Uni.createFrom().item(appUser));
 
     // when
-    this.appUserService.persistAppUser(appUser);
+    this.appUserService.persistAppUser(appUser).await().atMost(ONE_SEC);
 
     // then
     final var argumentCaptor = ArgumentCaptor.forClass(AppUser.class);
@@ -142,9 +155,9 @@ class AppUserServiceTest {
           // given
           final var appUser = this.provideSampleUser();
           when(this.appUserRepo.findByUserNameOrEmail(anyString(), anyString()))
-              .thenReturn(List.of(appUser));
+              .thenReturn(Uni.createFrom().item(List.of(appUser)));
 
-          AppUser copy = null;
+          AppUser copy;
           if (repetitionInfo.getCurrentRepetition() == 1) {
             copy = appUser.withEmail("fake123@mail.com");
           } else {
@@ -152,21 +165,23 @@ class AppUserServiceTest {
           }
 
           // when
-          this.appUserService.persistAppUser(copy);
+          this.appUserService.persistAppUser(copy).await().atMost(ONE_SEC);
         });
   }
 
   @Test
-  @DisplayName("Disable user will return an empty optional if user is not found")
+  @DisplayName("Disable user will resolve into an empty optional if user is not found")
   void disableUserWillReturnEmptyIfUserNotFound() {
     // when
-    when(this.appUserRepo.findByUserName(anyString())).thenReturn(Optional.empty());
+    when(this.appUserRepo.findByUserName(anyString())).thenReturn(Uni.createFrom().failure(
+        NoResultException::new));
 
     // then
     var output = this.appUserService.disableUser("johndoe");
 
     // then
-    assertThat(output, is(Optional.empty()));
+    final var disabledUser = output.await().atMost(ONE_SEC);
+    assertThat(disabledUser, is(Optional.empty()));
   }
 
   @ParameterizedTest
@@ -178,32 +193,36 @@ class AppUserServiceTest {
     var output = this.appUserService.disableUser(input);
 
     // then
-    assertThat(output, is(Optional.empty()));
+    final var disabledUser = output.await().atMost(ONE_SEC);
+    assertThat(disabledUser, is(Optional.empty()));
   }
 
-
   @Test
-  @DisplayName("Update user should return an empty optional if user is not found")
+  @DisplayName("Update user should resolve into an empty optional if user is not found")
   void updateUserShouldReturnEmptyIfUserNotFound() {
-    //given
-    when(this.appUserRepo.findByUserName(anyString())).thenReturn(Optional.empty());
+    // given
+    when(this.appUserRepo.findByUserName(anyString())).thenReturn(Uni.createFrom().failure(
+        NoResultException::new));
 
     // when
     var output = this.appUserService.updateAppUser(provideSampleUser());
 
     // then
-    assertThat(output, is(Optional.empty()));
+    final var updatedUser = output.await().atMost(ONE_SEC);
+    assertThat(updatedUser, is(Optional.empty()));
   }
 
   @Test
   @DisplayName("Update user should not change data that are considered constant")
   void updateUserShouldNotUpdateConstantData() {
-    //given
+    // given
     var repoUser = provideSampleUser();
     repoUser.setId(1000L);
+
     var fiveDaysAgo = Instant.now().minus(5, ChronoUnit.DAYS);
     repoUser.setCreationDate(fiveDaysAgo);
-    when(this.appUserRepo.findByUserName(anyString())).thenReturn(Optional.of(repoUser));
+
+    when(this.appUserRepo.findByUserName(anyString())).thenReturn(Uni.createFrom().item(repoUser));
 
     final var sampleUser = repoUser.withFirstName("John");
     sampleUser.setLastName("McN'Cheese");
@@ -218,7 +237,7 @@ class AppUserServiceTest {
     var output = this.appUserService.updateAppUser(sampleUser);
 
     // then
-    AppUser outputUser = output.get();
+    final var outputUser = output.await().atMost(ONE_SEC).get();
     assertThat(outputUser.getCreationDate(), is(fiveDaysAgo));
     assertThat(outputUser.getId(), is(repoUser.getId()));
     assertThat(outputUser.getUsername(), is(repoUser.getUsername()));
