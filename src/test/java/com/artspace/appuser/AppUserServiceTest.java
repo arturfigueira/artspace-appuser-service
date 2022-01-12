@@ -10,6 +10,8 @@ import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
+import com.artspace.appuser.outgoing.AppUserDTO;
+import com.artspace.appuser.outgoing.DataEmitter;
 import com.github.javafaker.Faker;
 import io.smallrye.mutiny.Uni;
 import java.time.Duration;
@@ -39,6 +41,7 @@ import org.mockito.junit.jupiter.MockitoExtension;
 @ExtendWith(MockitoExtension.class)
 class AppUserServiceTest {
 
+  @Mock private DataEmitter<AppUserDTO> emitter;
   @Mock private AppUserRepository appUserRepo;
 
   private AppUserService appUserService;
@@ -52,7 +55,7 @@ class AppUserServiceTest {
   @BeforeEach
   void setUp() {
     this.faker = new Faker(Locale.ENGLISH);
-    this.appUserService = new AppUserService(appUserRepo, LOGGER);
+    this.appUserService = new AppUserService(appUserRepo, emitter, LOGGER);
   }
 
   @ParameterizedTest
