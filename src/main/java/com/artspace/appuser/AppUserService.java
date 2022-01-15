@@ -1,9 +1,12 @@
 package com.artspace.appuser;
 
+import com.artspace.appuser.outgoing.AppUserDTO;
+import com.artspace.appuser.outgoing.DataEmitter;
 import io.quarkus.hibernate.reactive.panache.common.runtime.ReactiveTransactional;
 import io.smallrye.mutiny.Uni;
 import java.util.HashSet;
 import java.util.Optional;
+import java.util.UUID;
 import javax.enterprise.context.ApplicationScoped;
 import javax.persistence.NoResultException;
 import javax.transaction.Transactional;
@@ -21,9 +24,11 @@ import org.jboss.logging.Logger;
 @ApplicationScoped
 @AllArgsConstructor
 @ReactiveTransactional
-class AppUserService {
+public class AppUserService {
 
   final AppUserRepository appUserRepo;
+
+  final DataEmitter<AppUserDTO> dataEmitter;
 
   final Logger logger;
 
@@ -65,7 +70,10 @@ class AppUserService {
   /**
    * Disable a specific user by its username. If the user is already disable nothing will occur. At
    * the end of the action the username of the user will be returned as proof that the action
-   * worked, an empty optional will be returned in case of a non-existent user
+   * worked, an empty optional will be returned in case of a non-existent user.
+   *
+   * <p>Disabling the user will also trigger a message emission to propagate this change to
+   * external services that uses ser data
    *
    * @param userName Non-null, nor empty, username of the required User to be disabled
    * @return {@link Uni} that will resolve into an Optional with the username of the disabled user,
@@ -74,6 +82,8 @@ class AppUserService {
   public Uni<Optional<String>> disableUser(String userName) {
     return this.getUserByUserName(userName)
         .invoke(appUser -> appUser.ifPresent(AppUser::toggleActive))
+        .onItem()
+        .invoke(userOptional -> userOptional.ifPresent(this::broadcastChanges))
         .map(appUser -> appUser.map(AppUser::getUsername));
   }
 
@@ -92,7 +102,9 @@ class AppUserService {
     this.normalizeData(appUser);
     return this.validateUniqueness(appUser)
         .chain(appUserRepo::persist)
-        .invoke(entity -> logger.debugf("User successfully persisted: %s", entity));
+        .invoke(entity -> logger.debugf("User successfully persisted: %s", entity))
+        .onItem()
+        .invoke(this::broadcastChanges);
   }
 
   /**
@@ -122,7 +134,23 @@ class AppUserService {
                 logger.debugf("User successfully updated: %s", entity);
               }
               return userOptional;
-            });
+            })
+        .onItem()
+        .invoke(userOptional -> userOptional.ifPresent(this::broadcastChanges));
+  }
+
+  private void broadcastChanges(final AppUser appUser) {
+    final var appUserDTO = toDTO(appUser);
+    dataEmitter.emit(UUID.randomUUID().toString(), appUserDTO);
+  }
+
+  private static AppUserDTO toDTO(final AppUser appUser) {
+    final var appUserDTO = new AppUserDTO();
+    appUserDTO.setActive(appUser.isActive());
+    appUserDTO.setUsername(appUser.getUsername());
+    appUserDTO.setFirstName(appUser.getFirstName());
+    appUserDTO.setLastName(appUser.getLastName());
+    return appUserDTO;
   }
 
   private void normalizeData(AppUser appUser) {

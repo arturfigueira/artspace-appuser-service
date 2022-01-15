@@ -6,7 +6,7 @@ import javax.enterprise.context.ApplicationScoped;
 
 /** Concrete implementation of an AppUser repository over a relational database */
 @ApplicationScoped
-public class AppUserRepositoryImpl implements AppUserRepository {
+class AppUserRepositoryImpl implements AppUserRepository {
 
   public Uni<AppUser> findByUserName(String username) {
     return find("username", username).singleResult();

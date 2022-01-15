@@ -12,7 +12,9 @@ import javax.validation.constraints.Size;
 import lombok.AccessLevel;
 import lombok.AllArgsConstructor;
 import lombok.Data;
+import lombok.Getter;
 import lombok.NoArgsConstructor;
+import lombok.Setter;
 import lombok.ToString;
 import lombok.With;
 import org.eclipse.microprofile.openapi.annotations.media.Schema;
@@ -28,12 +30,13 @@ import org.eclipse.microprofile.openapi.annotations.media.Schema;
  */
 @Entity
 @Schema(description = "An application user")
-@Data
+@Setter(AccessLevel.PROTECTED)
+@Getter
 @ToString
-@NoArgsConstructor
+@NoArgsConstructor(access = AccessLevel.PROTECTED)
 @AllArgsConstructor(access = AccessLevel.PRIVATE)
 @With(AccessLevel.PROTECTED)
-class AppUser {
+public class AppUser {
 
   @Id @GeneratedValue private Long id;
 
@@ -73,11 +76,11 @@ class AppUser {
     return this.withCreationDate(Instant.now());
   }
 
-  public void enableIt() {
+  void enableIt() {
     this.isActive = true;
   }
 
-  public void toggleActive() {
+  void toggleActive() {
     this.isActive = !this.isActive;
   }
 }
