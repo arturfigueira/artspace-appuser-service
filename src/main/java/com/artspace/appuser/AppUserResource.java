@@ -14,7 +14,6 @@ import javax.ws.rs.core.Context;
 import javax.ws.rs.core.Response;
 import javax.ws.rs.core.UriInfo;
 import lombok.AllArgsConstructor;
-import org.eclipse.microprofile.faulttolerance.Bulkhead;
 import org.eclipse.microprofile.faulttolerance.Timeout;
 import org.eclipse.microprofile.openapi.annotations.Operation;
 import org.eclipse.microprofile.openapi.annotations.media.Content;
@@ -36,7 +35,6 @@ class AppUserResource {
   @GET
   @Path("/{username}")
   @Timeout()
-  @Bulkhead(20)
   @APIResponse(
       responseCode = "200",
       content =
@@ -67,7 +65,6 @@ class AppUserResource {
   @Operation(summary = "Creates a valid AppUser")
   @POST
   @Timeout()
-  @Bulkhead()
   @APIResponse(
       responseCode = "201",
       description = "The URI of the created AppUser",
