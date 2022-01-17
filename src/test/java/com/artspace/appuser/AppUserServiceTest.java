@@ -21,6 +21,7 @@ import java.util.Collections;
 import java.util.List;
 import java.util.Locale;
 import java.util.Optional;
+import java.util.UUID;
 import javax.persistence.NoResultException;
 import org.jboss.logging.Logger;
 import org.junit.jupiter.api.Assertions;
@@ -124,7 +125,7 @@ class AppUserServiceTest {
   @Test
   @DisplayName("Persisted User should be normalized")
   void persistUserShouldNormalizeUserData() {
-    // give
+    // given
     final var appUser = this.provideSampleUser();
     appUser.setUsername("  " + appUser.getUsername().toUpperCase() + "  ");
     appUser.setEmail("My.Email@AcMe.com");
@@ -137,8 +138,10 @@ class AppUserServiceTest {
     when(this.appUserRepo.persist(any(AppUser.class)))
         .thenReturn(Uni.createFrom().item(appUser));
 
+    var correlationId = getSampleCorrelationId();
+
     // when
-    this.appUserService.persistAppUser(appUser).await().atMost(ONE_SEC);
+    this.appUserService.persistAppUser(appUser, correlationId).await().atMost(ONE_SEC);
 
     // then
     final var argumentCaptor = ArgumentCaptor.forClass(AppUser.class);
@@ -160,6 +163,8 @@ class AppUserServiceTest {
           when(this.appUserRepo.findByUserNameOrEmail(anyString(), anyString()))
               .thenReturn(Uni.createFrom().item(List.of(appUser)));
 
+          var correlationId = getSampleCorrelationId();
+
           AppUser copy;
           if (repetitionInfo.getCurrentRepetition() == 1) {
             copy = appUser.withEmail("fake123@mail.com");
@@ -168,19 +173,21 @@ class AppUserServiceTest {
           }
 
           // when
-          this.appUserService.persistAppUser(copy).await().atMost(ONE_SEC);
+          this.appUserService.persistAppUser(copy, correlationId).await().atMost(ONE_SEC);
         });
   }
 
   @Test
   @DisplayName("Disable user will resolve into an empty optional if user is not found")
   void disableUserWillReturnEmptyIfUserNotFound() {
-    // when
+    // given
     when(this.appUserRepo.findByUserName(anyString())).thenReturn(Uni.createFrom().failure(
         NoResultException::new));
 
+    var correlationId = getSampleCorrelationId();
+
     // then
-    var output = this.appUserService.disableUser("johndoe");
+    var output = this.appUserService.disableUser("johndoe", correlationId);
 
     // then
     final var disabledUser = output.await().atMost(ONE_SEC);
@@ -192,8 +199,11 @@ class AppUserServiceTest {
   @NullAndEmptySource
   @ValueSource(strings = "   ")
   void disableUserWillIgnoreIfInputIsInvalid(String input) {
+    //given
+    var correlationId = getSampleCorrelationId();
+
     // then
-    var output = this.appUserService.disableUser(input);
+    var output = this.appUserService.disableUser(input, correlationId);
 
     // then
     final var disabledUser = output.await().atMost(ONE_SEC);
@@ -207,8 +217,10 @@ class AppUserServiceTest {
     when(this.appUserRepo.findByUserName(anyString())).thenReturn(Uni.createFrom().failure(
         NoResultException::new));
 
+    var correlationId = getSampleCorrelationId();
+
     // when
-    var output = this.appUserService.updateAppUser(provideSampleUser());
+    var output = this.appUserService.updateAppUser(provideSampleUser(), correlationId);
 
     // then
     final var updatedUser = output.await().atMost(ONE_SEC);
@@ -236,8 +248,10 @@ class AppUserServiceTest {
     sampleUser.toToday();
     sampleUser.setId(2000L);
 
+    var correlationId = getSampleCorrelationId();
+
     // when
-    var output = this.appUserService.updateAppUser(sampleUser);
+    var output = this.appUserService.updateAppUser(sampleUser, correlationId);
 
     // then
     final var outputUser = output.await().atMost(ONE_SEC).get();
@@ -259,5 +273,9 @@ class AppUserServiceTest {
     user.setEmail(username + "@acme.com");
     user.setId(1000L);
     return user;
+  }
+
+  private String getSampleCorrelationId() {
+    return UUID.randomUUID().toString();
   }
 }
