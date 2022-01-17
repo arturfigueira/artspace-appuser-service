@@ -1,5 +1,6 @@
 package com.artspace.appuser;
 
+import static com.artspace.appuser.AppUserResource.CORRELATION_HEADER;
 import static com.artspace.appuser.ExtStatus.UNPROCESSABLE_ENTITY;
 import static io.restassured.RestAssured.given;
 import static javax.ws.rs.core.HttpHeaders.ACCEPT;
@@ -17,6 +18,7 @@ import static org.hamcrest.MatcherAssert.assertThat;
 import com.github.javafaker.Faker;
 import io.quarkus.test.junit.QuarkusTest;
 import java.time.Duration;
+import java.util.UUID;
 import javax.inject.Inject;
 import org.hamcrest.core.Is;
 import org.junit.jupiter.api.BeforeAll;
@@ -49,6 +51,7 @@ class AppUserResourceTest {
   @DisplayName("An OPEN Api resource should be available")
   void shouldPingOpenAPI() {
     given()
+        .header(CORRELATION_HEADER, generateSampleCorrelationId())
         .header(ACCEPT, APPLICATION_JSON)
         .when()
         .get("/q/openapi")
@@ -61,6 +64,7 @@ class AppUserResourceTest {
   void shouldReturnEmptyResponseWhenUserNotFound() {
 
     given()
+        .header(CORRELATION_HEADER, generateSampleCorrelationId())
         .when()
         .pathParam("username", "not-one")
         .get("/api/appusers/{username}")
@@ -76,6 +80,7 @@ class AppUserResourceTest {
         userService.getUserByUserName(DEFAULT_USERNAME).await().atMost(FIVE_SECONDS).get();
 
     given()
+        .header(CORRELATION_HEADER, generateSampleCorrelationId())
         .when()
         .pathParam("username", DEFAULT_USERNAME)
         .get("/api/appusers/{username}")
@@ -103,6 +108,7 @@ class AppUserResourceTest {
         given()
             .header(CONTENT_TYPE, JSON)
             .header(ACCEPT, JSON)
+            .header(CORRELATION_HEADER, generateSampleCorrelationId())
             .body(appUser)
             .when()
             .post("/api/appusers")
@@ -115,6 +121,7 @@ class AppUserResourceTest {
     assertThat(location, endsWith("/api/appusers/johndoejr"));
 
     given()
+        .header(CORRELATION_HEADER, generateSampleCorrelationId())
         .pathParam("username", "johndoejr")
         .when()
         .get("/api/appusers/{username}")
@@ -142,6 +149,7 @@ class AppUserResourceTest {
     given()
         .header(CONTENT_TYPE, JSON)
         .header(ACCEPT, JSON)
+        .header(CORRELATION_HEADER, generateSampleCorrelationId())
         .body(appUser)
         .when()
         .post("/api/appusers")
@@ -155,6 +163,7 @@ class AppUserResourceTest {
     given()
         .header(CONTENT_TYPE, JSON)
         .header(ACCEPT, JSON)
+        .header(CORRELATION_HEADER, generateSampleCorrelationId())
         .when()
         .post("/api/appusers")
         .then()
@@ -169,6 +178,7 @@ class AppUserResourceTest {
     given()
         .header(CONTENT_TYPE, JSON)
         .header(ACCEPT, JSON)
+        .header(CORRELATION_HEADER, generateSampleCorrelationId())
         .body(appUser)
         .when()
         .post("/api/appusers")
@@ -178,6 +188,7 @@ class AppUserResourceTest {
     given()
         .header(CONTENT_TYPE, JSON)
         .header(ACCEPT, JSON)
+        .header(CORRELATION_HEADER, generateSampleCorrelationId())
         .body(appUser)
         .when()
         .post("/api/appusers")
@@ -189,11 +200,16 @@ class AppUserResourceTest {
   @DisplayName("Disable user should effectively disable required user")
   void shouldDisableAppUser() {
     // Given
-    var appUser = this.userService.persistAppUser(generateSampleUser()).await().atMost(FIVE_SECONDS);
+    var appUser =
+        this.userService
+            .persistAppUser(generateSampleUser(), UUID.randomUUID().toString())
+            .await()
+            .atMost(FIVE_SECONDS);
 
     // when
     given()
         .pathParam("username", appUser.getUsername())
+        .header(CORRELATION_HEADER, generateSampleCorrelationId())
         .when()
         .put("/api/appusers/{username}/disable")
         .then()
@@ -202,6 +218,7 @@ class AppUserResourceTest {
     // then
     given()
         .pathParam("username", appUser.getUsername())
+        .header(CORRELATION_HEADER, generateSampleCorrelationId())
         .when()
         .get("/api/appusers/{username}")
         .then()
@@ -228,6 +245,7 @@ class AppUserResourceTest {
     given()
         .header(CONTENT_TYPE, JSON)
         .header(ACCEPT, JSON)
+        .header(CORRELATION_HEADER, generateSampleCorrelationId())
         .body(appUser)
         .when()
         .post("/api/appusers")
@@ -243,6 +261,7 @@ class AppUserResourceTest {
         .when()
         .header(CONTENT_TYPE, JSON)
         .header(ACCEPT, JSON)
+        .header(CORRELATION_HEADER, generateSampleCorrelationId())
         .body(appUser)
         .put("/api/appusers")
         .then()
@@ -266,6 +285,7 @@ class AppUserResourceTest {
         .when()
         .header(CONTENT_TYPE, JSON)
         .header(ACCEPT, JSON)
+        .header(CORRELATION_HEADER, generateSampleCorrelationId())
         .body(appUser)
         .put("/api/appusers")
         .then()
@@ -282,11 +302,16 @@ class AppUserResourceTest {
     given()
         .header(CONTENT_TYPE, JSON)
         .header(ACCEPT, JSON)
+        .header(CORRELATION_HEADER, generateSampleCorrelationId())
         .body(appUser)
         .when()
         .put("/api/appusers")
         .then()
         .statusCode(BAD_REQUEST.getStatusCode());
+  }
+
+  private String generateSampleCorrelationId() {
+    return UUID.randomUUID().toString();
   }
 
   private AppUser generateSampleUser() {

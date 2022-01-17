@@ -29,7 +29,7 @@ import org.jboss.resteasy.reactive.RestPath;
 @Tag(name = "appusers")
 @AllArgsConstructor
 class AppUserResource {
-  private static final String CORRELATION_HEADER = "X-Request-ID";
+  protected static final String CORRELATION_HEADER = "X-Request-ID";
 
   final AppUserService appUserService;
   final Logger logger;
