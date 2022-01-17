@@ -5,8 +5,10 @@ import static javax.ws.rs.core.MediaType.APPLICATION_JSON;
 import io.smallrye.mutiny.Uni;
 import java.net.URI;
 import javax.validation.Valid;
+import javax.validation.constraints.NotBlank;
 import javax.validation.constraints.NotNull;
 import javax.ws.rs.GET;
+import javax.ws.rs.HeaderParam;
 import javax.ws.rs.POST;
 import javax.ws.rs.PUT;
 import javax.ws.rs.Path;
@@ -27,6 +29,7 @@ import org.jboss.resteasy.reactive.RestPath;
 @Tag(name = "appusers")
 @AllArgsConstructor
 class AppUserResource {
+  private static final String CORRELATION_HEADER = "X-Request-ID";
 
   final AppUserService appUserService;
   final Logger logger;
@@ -40,7 +43,8 @@ class AppUserResource {
       content =
           @Content(mediaType = APPLICATION_JSON, schema = @Schema(implementation = AppUser.class)))
   @APIResponse(responseCode = "204", description = "The app user is not found for a given username")
-  public Uni<Response> getAppUser(@RestPath String username) {
+  public Uni<Response> getAppUser(@RestPath String username,
+      @NotBlank @HeaderParam(CORRELATION_HEADER) String correlationId) {
     try{
       var user = appUserService.getUserByUserName(username);
 
@@ -48,10 +52,10 @@ class AppUserResource {
           appUser -> {
             var response = Response.noContent().build();
             if (appUser.isPresent()) {
-              logger.tracef("Found user %s", appUser.get());
+              logger.debugf("[%s] Found user %s", correlationId, appUser.get());
               response = Response.ok(appUser.get()).build();
             } else {
-              logger.tracef("User not found with username %s", username);
+              logger.debugf("[%s] User not found with username %s", correlationId, username);
             }
 
             return response;
@@ -73,12 +77,14 @@ class AppUserResource {
   @APIResponse(
       responseCode = "422",
       description = "The AppUser entity was not able to be persisted due to a conflict")
-  public Uni<Response> createAppUser(@Valid @NotNull AppUser appUser, @Context UriInfo uriInfo) {
-    var persistedUser = appUserService.persistAppUser(appUser);
+  public Uni<Response> createAppUser(@Valid @NotNull AppUser appUser,
+      @NotBlank @HeaderParam(CORRELATION_HEADER) String correlationId,
+      @Context final UriInfo uriInfo) {
+    var persistedUser = appUserService.persistAppUser(appUser, correlationId);
     return persistedUser.map(
         entity -> {
           var builder = uriInfo.getAbsolutePathBuilder().path(entity.getUsername());
-          logger.debugf("New AppUser created with URI %s", builder.build().toString());
+          logger.debugf("[%s] New AppUser created with URI %s", correlationId, builder.build().toString());
           return Response.created(builder.build()).build();
         });
   }
@@ -88,18 +94,19 @@ class AppUserResource {
   @Timeout()
   @APIResponse(responseCode = "200", description = "AppUser successfully updated")
   @APIResponse(responseCode = "204", description = "No AppUser found for the given identifier")
-  public Uni<Response> updateAppUser(@Valid @NotNull AppUser toBeUpdated) {
-    final var updatedUser = this.appUserService.updateAppUser(toBeUpdated);
+  public Uni<Response> updateAppUser(@Valid @NotNull AppUser toBeUpdated,
+      @NotBlank @HeaderParam(CORRELATION_HEADER) String correlationId) {
+    final var updatedUser = this.appUserService.updateAppUser(toBeUpdated, correlationId);
     return updatedUser.map(
         userOptional -> {
           var response = Response.noContent().build();
           if (userOptional.isPresent()) {
             final var entity = userOptional.get();
-            logger.debugf("AppUser %s successfully updated", entity.getUsername());
+            logger.debugf("[%s] AppUser %s successfully updated", correlationId, entity.getUsername());
             response = Response.ok(entity).build();
           } else {
             logger.debugf(
-                "AppUser %s not disable due to being not found", toBeUpdated.getUsername());
+                "[%s] AppUser %s not disable due to being not found", correlationId, toBeUpdated.getUsername());
           }
 
           return response;
@@ -112,17 +119,18 @@ class AppUserResource {
   @Timeout()
   @APIResponse(responseCode = "200", description = "AppUser successfully disabled")
   @APIResponse(responseCode = "204", description = "No AppUser found for the given identifier")
-  public Uni<Response> disableAppUser(@RestPath String username) {
-    final var disabledUser = this.appUserService.disableUser(username);
+  public Uni<Response> disableAppUser(@RestPath String username,
+      @NotBlank @HeaderParam(CORRELATION_HEADER) String correlationId) {
+    final var disabledUser = this.appUserService.disableUser(username, correlationId);
 
     return disabledUser.map(
         userNameOptional -> {
           var response = Response.noContent().build();
           if (userNameOptional.isPresent()) {
-            logger.debugf("AppUser %s successfully disabled", userNameOptional.get());
+            logger.debugf("[%s] AppUser %s successfully disabled", correlationId, userNameOptional.get());
             response = Response.ok().build();
           } else {
-            logger.debugf("AppUser %s not disable due to being not found", username);
+            logger.debugf("[%s] AppUser %s not disable due to being not found", correlationId, username);
           }
 
           return response;

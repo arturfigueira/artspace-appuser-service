@@ -6,12 +6,12 @@ import io.quarkus.hibernate.reactive.panache.common.runtime.ReactiveTransactiona
 import io.smallrye.mutiny.Uni;
 import java.util.HashSet;
 import java.util.Optional;
-import java.util.UUID;
 import javax.enterprise.context.ApplicationScoped;
 import javax.persistence.NoResultException;
 import javax.transaction.Transactional;
 import javax.transaction.Transactional.TxType;
 import javax.validation.Valid;
+import javax.validation.constraints.NotBlank;
 import javax.validation.constraints.NotNull;
 import lombok.AllArgsConstructor;
 import org.jboss.logging.Logger;
@@ -76,14 +76,15 @@ public class AppUserService {
    * external services that uses ser data
    *
    * @param userName Non-null, nor empty, username of the required User to be disabled
+   * @param correlationId Trasnsit id to identify the request between services
    * @return {@link Uni} that will resolve into an Optional with the username of the disabled user,
    *     an empty optional will be returned if no user was found
    */
-  public Uni<Optional<String>> disableUser(String userName) {
+  public Uni<Optional<String>> disableUser(String userName, final String correlationId) {
     return this.getUserByUserName(userName)
         .invoke(appUser -> appUser.ifPresent(AppUser::toggleActive))
         .onItem()
-        .invoke(userOptional -> userOptional.ifPresent(this::broadcastChanges))
+        .invoke(userOptional -> userOptional.ifPresent(u->this.broadcastChanges(u, correlationId)))
         .map(appUser -> appUser.map(AppUser::getUsername));
   }
 
@@ -92,19 +93,21 @@ public class AppUserService {
    * valid attributes, according tho its schema. It must also contain a unique username and email.
    *
    * @param inputAppUser which is required to be persisted
+   * @param correlationId Trasnsit id to identify the request between services
    * @throws UniquenessViolationException if Username or email are not unique
    * @throws javax.validation.ConstraintViolationException if given user contains any invalid data
-   * @throws NullPointerException If inputAppUser is null
+   * @throws NullPointerException If inputAppUser is null or correlationId is blank
    * @return An {@link Uni} that will be resolved into the persisted AppUser
    */
-  public Uni<AppUser> persistAppUser(final @Valid @NotNull AppUser inputAppUser) {
+  public Uni<AppUser> persistAppUser(final @Valid @NotNull AppUser inputAppUser,
+      @NotBlank final String correlationId) {
     final var appUser = inputAppUser.toToday();
     this.normalizeData(appUser);
     return this.validateUniqueness(appUser)
         .chain(appUserRepo::persist)
-        .invoke(entity -> logger.debugf("User successfully persisted: %s", entity))
+        .invoke(entity -> logger.debugf("[%s] User successfully persisted: %s", correlationId, entity))
         .onItem()
-        .invoke(this::broadcastChanges);
+        .invoke(u->this.broadcastChanges(u, correlationId));
   }
 
   /**
@@ -112,15 +115,17 @@ public class AppUserService {
    * date and isActive won't be updated via this method. The former three are constants, and It's
    * important to not update them, as it is used by the entire application as a data bound.
    *
-   * <p>Disable a appUser can be achieved with {@link #disableUser(String)}}
+   * <p>Disable a appUser can be achieved with {@link #disableUser(String, String)}}}
    *
    * @param inputAppUser instance with the updated data
+   * @param correlationId Trasnsit id to identify the request between services
    * @throws javax.validation.ConstraintViolationException if given user contains any invalid data
    * @throws NullPointerException If specified user is null
    * @return An {@link Uni} that will resolve into an optional with the updated AppUser data or an
    *     empty optional if the user was not found.
    */
-  public Uni<Optional<AppUser>> updateAppUser(final @Valid @NotNull AppUser inputAppUser) {
+  public Uni<Optional<AppUser>> updateAppUser(final @Valid @NotNull AppUser inputAppUser,
+      final String correlationId) {
     return this.getUserByUserName(inputAppUser.getUsername())
         .map(
             userOptional -> {
@@ -131,17 +136,17 @@ public class AppUserService {
                 entity.setFirstName(inputAppUser.getFirstName());
                 entity.setLastName(inputAppUser.getLastName());
                 entity.setBiography(inputAppUser.getBiography());
-                logger.debugf("User successfully updated: %s", entity);
+                logger.debugf("[%s] User successfully updated: %s", correlationId, entity);
               }
               return userOptional;
             })
         .onItem()
-        .invoke(userOptional -> userOptional.ifPresent(this::broadcastChanges));
+        .invoke(userOptional -> userOptional.ifPresent(u->this.broadcastChanges(u, correlationId)));
   }
 
-  private void broadcastChanges(final AppUser appUser) {
+  private void broadcastChanges(final AppUser appUser, final String correlationId) {
     final var appUserDTO = toDTO(appUser);
-    dataEmitter.emit(UUID.randomUUID().toString(), appUserDTO);
+    dataEmitter.emit(correlationId, appUserDTO);
   }
 
   private static AppUserDTO toDTO(final AppUser appUser) {
