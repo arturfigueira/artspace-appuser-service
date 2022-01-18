@@ -1,5 +1,7 @@
 package com.artspace.appuser;
 
+import static javax.persistence.GenerationType.SEQUENCE;
+
 import java.time.Instant;
 import javax.persistence.Column;
 import javax.persistence.Entity;
@@ -38,7 +40,8 @@ import org.eclipse.microprofile.openapi.annotations.media.Schema;
 @With(AccessLevel.PROTECTED)
 public class AppUser {
 
-  @Id @GeneratedValue private Long id;
+  @Id @GeneratedValue(strategy=SEQUENCE, generator="seq_appuser_id")
+  private Long id;
 
   @NotNull
   @Column(unique = true)

@@ -1,5 +1,7 @@
 package com.artspace.appuser.outgoing;
 
+import static javax.persistence.GenerationType.SEQUENCE;
+
 import java.time.Instant;
 import javax.persistence.Entity;
 import javax.persistence.GeneratedValue;
@@ -22,7 +24,8 @@ import lombok.ToString;
 @Builder
 class FailedMessage {
 
-  @Id @GeneratedValue private Long id;
+  @Id @GeneratedValue(strategy=SEQUENCE, generator="seq_failedmsg_id")
+  private Long id;
 
   private String correlationId;
 
