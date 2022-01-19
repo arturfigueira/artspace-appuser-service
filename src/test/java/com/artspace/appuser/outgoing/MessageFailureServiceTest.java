@@ -8,11 +8,8 @@ import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.github.javafaker.Faker;
 import io.quarkus.test.junit.QuarkusTest;
-import io.smallrye.mutiny.Uni;
 import io.smallrye.reactive.messaging.kafka.OutgoingKafkaRecord;
 import java.time.Duration;
-import java.util.ArrayList;
-import java.util.List;
 import java.util.Locale;
 import java.util.UUID;
 import javax.inject.Inject;
@@ -22,6 +19,7 @@ import org.jboss.logging.Logger;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.MethodOrderer;
+import org.junit.jupiter.api.Order;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.TestMethodOrder;
 
@@ -51,6 +49,7 @@ class MessageFailureServiceTest {
         .atMost(Duration.ofMinutes(1L));
   }
 
+  @Order(1)
   @Test
   @DisplayName("Service should persist any failed message")
   void registerFailureShouldPersistIntoRepository() throws JsonProcessingException {
@@ -80,25 +79,18 @@ class MessageFailureServiceTest {
     assertThat(received, Is.is(appUserDTO));
   }
 
+  @Order(2)
   @Test
   @DisplayName("Process Next Failure should set failure as processed")
   void processNextFailureShouldSetAsProcessed() {
     // given
-    List<Uni<Void>> messages = new ArrayList<>();
     for (var index = 0; index <= 5; index++) {
       final var appUserDTO = provideSampleUser();
       final var message = messageOf(appUserDTO);
 
-      messages.add(
-          this.emitFallbackService.registerFailure(
-              message, new IllegalStateException("Mocked Error " + index)));
+      this.emitFallbackService.registerFailure(
+          message, new IllegalStateException("Mocked Error " + index)).await().atMost(ONE_SECOND);
     }
-    Uni.combine()
-        .all()
-        .unis(messages)
-        .combinedWith(List::size)
-        .await()
-        .atMost(Duration.ofSeconds(5));
 
     // when
     final var failedMessage =
