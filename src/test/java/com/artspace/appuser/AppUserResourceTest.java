@@ -29,7 +29,6 @@ import org.junit.jupiter.api.TestMethodOrder;
 
 // FIXME: Move this from UnitTest to an IntegrationTest. Too "slow" to be considered a unit test
 @QuarkusTest
-@TestMethodOrder(MethodOrderer.OrderAnnotation.class)
 class AppUserResourceTest {
 
   private static final String JSON = "application/json;charset=UTF-8";

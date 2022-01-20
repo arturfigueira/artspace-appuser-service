@@ -5,45 +5,62 @@ import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.doAnswer;
-import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.when;
 
 import com.github.javafaker.Faker;
-import io.quarkus.test.common.QuarkusTestResource;
-import io.quarkus.test.junit.QuarkusTest;
+import io.smallrye.mutiny.Uni;
 import io.smallrye.reactive.messaging.MutinyEmitter;
-import io.smallrye.reactive.messaging.connectors.InMemoryConnector;
 import io.smallrye.reactive.messaging.kafka.api.OutgoingKafkaRecordMetadata;
 import java.util.Locale;
+import java.util.ServiceConfigurationError;
 import java.util.UUID;
-import javax.enterprise.inject.Any;
-import javax.inject.Inject;
+import java.util.concurrent.CompletionStage;
+import java.util.concurrent.ExecutionException;
+import java.util.concurrent.atomic.AtomicReference;
 import org.eclipse.microprofile.reactive.messaging.Message;
 import org.hamcrest.core.Is;
 import org.jboss.logging.Logger;
 import org.junit.jupiter.api.BeforeAll;
+import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.extension.ExtendWith;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.EmptySource;
 import org.junit.jupiter.params.provider.NullSource;
 import org.junit.jupiter.params.provider.ValueSource;
+import org.mockito.ArgumentCaptor;
+import org.mockito.Captor;
+import org.mockito.Mock;
+import org.mockito.junit.jupiter.MockitoExtension;
 
-
-@QuarkusTest
-@QuarkusTestResource(KafkaTestResourceLifecycleManager.class)
+@ExtendWith(MockitoExtension.class)
 class AppUserKafkaEmitterTest {
 
   static Faker FAKER;
 
-  @Inject AppUserKafkaEmitter appUserKafkaEmitter;
+  AppUserKafkaEmitter appUserKafkaEmitter;
 
-  @Inject @Any InMemoryConnector connector;
+  @Mock MutinyEmitter<AppUserDTO> mutinyEmitter;
+
+  @Mock EmitFallbackService fallbackService;
+
+  @Captor ArgumentCaptor<Message<AppUserDTO>> messageCaptor;
 
   @BeforeAll
   static void setup() {
     FAKER = new Faker(Locale.ENGLISH);
+  }
+
+  @BeforeEach
+  void beforeEach() {
+    appUserKafkaEmitter = new AppUserKafkaEmitter();
+    appUserKafkaEmitter.correlationKey = "correlationId";
+    appUserKafkaEmitter.logger = Logger.getLogger(AppUserKafkaEmitter.class);
+    appUserKafkaEmitter.emitter = mutinyEmitter;
+    appUserKafkaEmitter.fallbackService = fallbackService;
   }
 
   @Test
@@ -73,17 +90,14 @@ class AppUserKafkaEmitterTest {
   @DisplayName("Emit should send Message following required specs")
   void emitShouldProperlyEmitMessageToBroker() {
     // given
-    final var appUserOutChannel = connector.sink("appusers-out");
-
     final var appUserDTO = generateSampleUser();
 
     // when
     appUserKafkaEmitter.emit(UUID.randomUUID().toString(), appUserDTO);
 
     // then
-    assertThat(appUserOutChannel.received().size(), Is.is(1));
-
-    final var message = appUserOutChannel.received().get(0);
+    verify(mutinyEmitter).send(messageCaptor.capture());
+    final var message = messageCaptor.getValue();
     var hasCorrelationId =
         message
             .getMetadata(OutgoingKafkaRecordMetadata.class)
@@ -100,34 +114,46 @@ class AppUserKafkaEmitterTest {
   @Test
   @DisplayName("Emit should handle failures for later processing")
   @SuppressWarnings("unchecked")
-  void emitShouldHandleFailuresForLater() {
+  void emitShouldHandleFailuresForLater() throws ExecutionException, InterruptedException {
     // given
-    final MutinyEmitter mutinyEmitter = mock(MutinyEmitter.class);
-    var kafkaEmitter = new AppUserKafkaEmitter();
-    kafkaEmitter.emitter = mutinyEmitter;
-    kafkaEmitter.logger = Logger.getLogger(this.getClass());
-
-    final var fallbackService = mock(EmitFallbackService.class);
-    kafkaEmitter.fallbackService = fallbackService;
-    kafkaEmitter.correlationKey = "correlationId";
-
     final var appUserDTO = generateSampleUser();
 
+    when(fallbackService.registerFailure(any(Message.class), any(Throwable.class)))
+        .thenReturn(Uni.createFrom().voidItem());
+
+    final var messageNackRunnable = new AtomicReference<CompletionStage<Void>>(null);
     doAnswer(
             invocation -> {
               Message<?> message = invocation.getArgument(0);
-              message.nack(new IllegalStateException());
+              messageNackRunnable.set(message.nack(new IllegalStateException()));
               return null;
             })
         .when(mutinyEmitter)
         .send(any(Message.class));
 
     // when
-    kafkaEmitter.emit(UUID.randomUUID().toString(), appUserDTO);
+    appUserKafkaEmitter.emit(UUID.randomUUID().toString(), appUserDTO);
 
     // then
+    giveBreathForTheThreadToFinish();
     verify(fallbackService, times(1))
         .registerFailure(any(Message.class), any(IllegalStateException.class));
+  }
+
+  /**
+   * It was identified a bug with quarkus' and {@link ServiceConfigurationError}, which prevented
+   * the usage of a elegant saluting via {@code
+   * messageNackRunnable.get().toCompletableFuture().get()} to wait for the nack runnable to finish,
+   * before validating the result of the test. Until this is fixed a thread sleep was introduced.
+   *
+   * <p>Refer to <A href="https://github.com/quarkusio/quarkus/issues/19494">Quarkus Issue 19494</A>
+   */
+  private void giveBreathForTheThreadToFinish() {
+    try {
+      Thread.sleep(2000);
+    } catch (InterruptedException e) {
+      Thread.currentThread().interrupt();
+    }
   }
 
   private static AppUserDTO generateSampleUser() {
