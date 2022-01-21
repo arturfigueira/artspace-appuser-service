@@ -16,7 +16,6 @@ import javax.ws.rs.core.Context;
 import javax.ws.rs.core.Response;
 import javax.ws.rs.core.UriInfo;
 import lombok.AllArgsConstructor;
-import org.eclipse.microprofile.faulttolerance.Timeout;
 import org.eclipse.microprofile.openapi.annotations.Operation;
 import org.eclipse.microprofile.openapi.annotations.media.Content;
 import org.eclipse.microprofile.openapi.annotations.media.Schema;
@@ -45,7 +44,7 @@ class AppUserResource {
   public Uni<Response> getAppUser(@RestPath String username,
       @NotBlank @HeaderParam(CORRELATION_HEADER) String correlationId) {
     try{
-      var user = appUserService.getUserByUserName(username);
+      var user = appUserService.getUserByUserName(username, correlationId);
 
       return user.map(
           appUser -> {

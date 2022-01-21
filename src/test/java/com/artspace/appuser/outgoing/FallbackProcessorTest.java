@@ -106,7 +106,7 @@ class FallbackProcessorTest {
     when(fallbackService.processNextFailure())
         .thenReturn(Uni.createFrom().item(Optional.of(failedMessage)));
 
-    when(userService.getUserByUserName(anyString()))
+    when(userService.getUserByUserName(anyString(), anyString()))
         .thenReturn(Uni.createFrom().item(Optional.empty()));
 
     // when
@@ -127,7 +127,7 @@ class FallbackProcessorTest {
         .thenReturn(Uni.createFrom().item(Optional.of(failedMessage)));
 
     final var user = FakeUser.from(provideSampleUser());
-    when(userService.getUserByUserName(anyString()))
+    when(userService.getUserByUserName(anyString(), anyString()))
         .thenReturn(Uni.createFrom().item(Optional.of(user)));
 
     // when
@@ -148,7 +148,7 @@ class FallbackProcessorTest {
     when(fallbackService.processNextFailure())
         .thenReturn(Uni.createFrom().item(Optional.of(failedMessage)));
 
-    when(userService.getUserByUserName(anyString()))
+    when(userService.getUserByUserName(anyString(), anyString()))
         .thenReturn(Uni.createFrom().item(Optional.of(FakeUser.from(sampleUser))));
 
     // when
