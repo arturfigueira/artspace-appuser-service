@@ -6,6 +6,7 @@ import io.quarkus.hibernate.reactive.panache.common.runtime.ReactiveTransactiona
 import io.smallrye.mutiny.Uni;
 import java.util.HashSet;
 import java.util.Optional;
+import java.util.Set;
 import javax.enterprise.context.ApplicationScoped;
 import javax.persistence.NoResultException;
 import javax.transaction.Transactional;
@@ -72,8 +73,8 @@ public class AppUserService {
    * the end of the action the username of the user will be returned as proof that the action
    * worked, an empty optional will be returned in case of a non-existent user.
    *
-   * <p>Disabling the user will also trigger a message emission to propagate this change to
-   * external services that uses ser data
+   * <p>Disabling the user will also trigger a message emission to propagate this change to external
+   * services that uses ser data
    *
    * @param userName Non-null, nor empty, username of the required User to be disabled
    * @param correlationId Trasnsit id to identify the request between services
@@ -84,7 +85,8 @@ public class AppUserService {
     return this.getUserByUserName(userName)
         .invoke(appUser -> appUser.ifPresent(AppUser::toggleActive))
         .onItem()
-        .invoke(userOptional -> userOptional.ifPresent(u->this.broadcastChanges(u, correlationId)))
+        .invoke(
+            userOptional -> userOptional.ifPresent(u -> this.broadcastChanges(u, correlationId)))
         .map(appUser -> appUser.map(AppUser::getUsername));
   }
 
@@ -99,15 +101,16 @@ public class AppUserService {
    * @throws NullPointerException If inputAppUser is null or correlationId is blank
    * @return An {@link Uni} that will be resolved into the persisted AppUser
    */
-  public Uni<AppUser> persistAppUser(final @Valid @NotNull AppUser inputAppUser,
-      @NotBlank final String correlationId) {
+  public Uni<AppUser> persistAppUser(
+      final @Valid @NotNull AppUser inputAppUser, @NotBlank final String correlationId) {
     final var appUser = inputAppUser.toToday();
     this.normalizeData(appUser);
     return this.validateUniqueness(appUser)
         .chain(appUserRepo::persist)
-        .invoke(entity -> logger.debugf("[%s] User successfully persisted: %s", correlationId, entity))
+        .invoke(
+            entity -> logger.debugf("[%s] User successfully persisted: %s", correlationId, entity))
         .onItem()
-        .invoke(u->this.broadcastChanges(u, correlationId));
+        .invoke(u -> this.broadcastChanges(u, correlationId));
   }
 
   /**
@@ -124,24 +127,46 @@ public class AppUserService {
    * @return An {@link Uni} that will resolve into an optional with the updated AppUser data or an
    *     empty optional if the user was not found.
    */
-  public Uni<Optional<AppUser>> updateAppUser(final @Valid @NotNull AppUser inputAppUser,
-      final String correlationId) {
+  public Uni<Optional<AppUser>> updateAppUser(
+      final @Valid @NotNull AppUser inputAppUser, final String correlationId) {
     return this.getUserByUserName(inputAppUser.getUsername())
-        .map(
-            userOptional -> {
-              if (userOptional.isPresent()) {
-                final var entity = userOptional.get();
-                this.normalizeData(inputAppUser);
-                entity.setEmail(inputAppUser.getEmail());
-                entity.setFirstName(inputAppUser.getFirstName());
-                entity.setLastName(inputAppUser.getLastName());
-                entity.setBiography(inputAppUser.getBiography());
-                logger.debugf("[%s] User successfully updated: %s", correlationId, entity);
-              }
-              return userOptional;
-            })
+        .chain(
+            userOptional ->
+                userOptional.isPresent()
+                    ? validateAndMerge(inputAppUser, userOptional.get(), correlationId)
+                    : ignoreUpdate(inputAppUser, correlationId));
+  }
+
+  private Uni<Optional<AppUser>> validateAndMerge(
+      final AppUser inputAppUser, final AppUser dbUser, final String correlationId) {
+    return this.validateMailUniqueness(inputAppUser)
+        .map(appUser -> updateAndFlush(appUser, dbUser))
         .onItem()
-        .invoke(userOptional -> userOptional.ifPresent(u->this.broadcastChanges(u, correlationId)));
+        .invoke(u -> broadcastChanges(u, correlationId))
+        .invoke(u -> logger.debugf("[%s] User successfully updated: %s", correlationId, u))
+        .map(Optional::of);
+  }
+
+  private Uni<Optional<AppUser>> ignoreUpdate(
+      final AppUser inputAppUser, final String correlationId) {
+    logger.debugf(
+        "[%s] User %s not found. Updated ignored", correlationId, inputAppUser.getUsername());
+    return Uni.createFrom().item(Optional.empty());
+  }
+
+  /**
+   * * We can`t let the context perceive, by it own, that this element was updated, and onliest than
+   * update its content into the database. We must certify that changes can be merged right on,
+   * before propagating the update to other services
+   */
+  private AppUser updateAndFlush(final AppUser inputAppUser, final AppUser storedUser) {
+    this.normalizeData(inputAppUser);
+    storedUser.setEmail(inputAppUser.getEmail());
+    storedUser.setFirstName(inputAppUser.getFirstName());
+    storedUser.setLastName(inputAppUser.getLastName());
+    storedUser.setBiography(inputAppUser.getBiography());
+    this.appUserRepo.flush();
+    return storedUser;
   }
 
   private void broadcastChanges(final AppUser appUser, final String correlationId) {
@@ -162,6 +187,19 @@ public class AppUserService {
     appUser.enableIt();
     appUser.setEmail(appUser.getEmail().toLowerCase().trim());
     appUser.setUsername(appUser.getUsername().toLowerCase().trim());
+  }
+
+  private Uni<AppUser> validateMailUniqueness(final AppUser appUser) {
+    return this.appUserRepo
+        .findByUserNameOrEmail(appUser.getUsername(), appUser.getEmail())
+        .map(
+            entities -> {
+              if (entities.size() > 1) {
+                final var violation = new UniquenessViolation("email", "E-mail must be unique");
+                throw new UniquenessViolationException(Set.of(violation));
+              }
+              return appUser;
+            });
   }
 
   private Uni<AppUser> validateUniqueness(AppUser appUser) {

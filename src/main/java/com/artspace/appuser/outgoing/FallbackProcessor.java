@@ -91,13 +91,13 @@ class FallbackProcessor {
 
   private void doEmit(String correlationId, final AppUserDTO appUserDTO) {
     logger.debugf(
-        "Re-emitting failed message with correlationId %s. Data: %s", correlationId, appUserDTO);
+        "[%s]Re-emitting failed message. Data: %s", correlationId, appUserDTO);
     emitter.emit(correlationId, appUserDTO);
   }
 
   private void ignoreEmission(String correlationId, final AppUserDTO appUserDTO) {
     logger.warnf(
-        "Re-emitting was ignored for % due to data being obsolete. Data: %s",
+        "[%s]Re-emitting was ignored due to data being obsolete. Data: %s",
         correlationId, appUserDTO);
   }
 

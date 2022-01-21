@@ -238,6 +238,8 @@ class AppUserServiceTest {
     repoUser.setCreationDate(fiveDaysAgo);
 
     when(this.appUserRepo.findByUserName(anyString())).thenReturn(Uni.createFrom().item(repoUser));
+    when(this.appUserRepo.findByUserNameOrEmail(anyString(), anyString()))
+        .thenReturn(Uni.createFrom().item(List.of(repoUser)));
 
     final var sampleUser = repoUser.withFirstName("John");
     sampleUser.setLastName("McN'Cheese");
