@@ -37,7 +37,6 @@ class AppUserResource {
   @Operation(summary = "Returns an app user for a given username")
   @GET
   @Path("/{username}")
-  @Timeout()
   @APIResponse(
       responseCode = "200",
       content =
@@ -68,7 +67,6 @@ class AppUserResource {
 
   @Operation(summary = "Creates a valid AppUser")
   @POST
-  @Timeout()
   @APIResponse(
       responseCode = "201",
       description = "The URI of the created AppUser",
@@ -91,7 +89,6 @@ class AppUserResource {
 
   @Operation(summary = "Updates an existing AppUser")
   @PUT
-  @Timeout()
   @APIResponse(responseCode = "200", description = "AppUser successfully updated")
   @APIResponse(responseCode = "204", description = "No AppUser found for the given identifier")
   public Uni<Response> updateAppUser(@Valid @NotNull AppUser toBeUpdated,
@@ -116,7 +113,6 @@ class AppUserResource {
   @Operation(summary = "Disable a AppUser")
   @PUT
   @Path("/{username}/disable")
-  @Timeout()
   @APIResponse(responseCode = "200", description = "AppUser successfully disabled")
   @APIResponse(responseCode = "204", description = "No AppUser found for the given identifier")
   public Uni<Response> disableAppUser(@RestPath String username,
