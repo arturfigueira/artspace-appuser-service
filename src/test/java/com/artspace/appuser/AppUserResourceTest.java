@@ -23,9 +23,7 @@ import javax.inject.Inject;
 import org.hamcrest.core.Is;
 import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.DisplayName;
-import org.junit.jupiter.api.MethodOrderer;
 import org.junit.jupiter.api.Test;
-import org.junit.jupiter.api.TestMethodOrder;
 
 // FIXME: Move this from UnitTest to an IntegrationTest. Too "slow" to be considered a unit test
 @QuarkusTest
@@ -76,7 +74,8 @@ class AppUserResourceTest {
   void shouldGetExistingAppUserByUserName() {
 
     final var user =
-        userService.getUserByUserName(DEFAULT_USERNAME).await().atMost(FIVE_SECONDS).get();
+        userService.getUserByUserNameFromDataBase(DEFAULT_USERNAME)
+            .await().atMost(FIVE_SECONDS).get();
 
     given()
         .header(CORRELATION_HEADER, generateSampleCorrelationId())

@@ -66,7 +66,7 @@ class FallbackProcessor {
           objectMapper.readValue(failedMessage.getSerializedPayload(), AppUserDTO.class);
 
       userService
-          .getUserByUserName(appUserDTO.getUsername())
+          .getUserByUserName(appUserDTO.getUsername(), correlationId)
           .map(userOptional -> shouldReEmit(appUserDTO, userOptional))
           .chain(chainEmission(correlationId, appUserDTO))
           .subscribe()

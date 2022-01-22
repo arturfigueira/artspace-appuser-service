@@ -7,9 +7,14 @@ import static org.hamcrest.MatcherAssert.assertThat;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyString;
+import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.Mockito.never;
+import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
+import com.artspace.appuser.cache.CacheService;
+import com.artspace.appuser.cache.CacheUserDTO;
 import com.artspace.appuser.outgoing.AppUserDTO;
 import com.artspace.appuser.outgoing.DataEmitter;
 import com.github.javafaker.Faker;
@@ -34,6 +39,7 @@ import org.junit.jupiter.api.extension.ExtendWith;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.NullAndEmptySource;
 import org.junit.jupiter.params.provider.ValueSource;
+import org.mapstruct.factory.Mappers;
 import org.mockito.ArgumentCaptor;
 import org.mockito.Mock;
 import org.mockito.Mockito;
@@ -44,6 +50,9 @@ class AppUserServiceTest {
 
   @Mock private DataEmitter<AppUserDTO> emitter;
   @Mock private AppUserRepository appUserRepo;
+  @Mock private CacheService cacheService;
+
+  private final AppUserMapper appUserMapper = Mappers.getMapper(AppUserMapper.class);
 
   private AppUserService appUserService;
 
@@ -56,7 +65,8 @@ class AppUserServiceTest {
   @BeforeEach
   void setUp() {
     this.faker = new Faker(Locale.ENGLISH);
-    this.appUserService = new AppUserService(appUserRepo, emitter, LOGGER);
+    this.appUserService =
+        new AppUserService(appUserRepo, emitter, cacheService, appUserMapper, LOGGER);
   }
 
   @ParameterizedTest
@@ -64,8 +74,11 @@ class AppUserServiceTest {
   @NullAndEmptySource
   @DisplayName("An invalid username, such as {0}, should always resolved into an empty optional")
   void getByUserNameReturnsEmptyWithInvalidArgs(String value) {
+    //given
+    when(cacheService.find(any())).thenReturn(Uni.createFrom().item(Optional.empty()));
+
     // when
-    var user = this.appUserService.getUserByUserName(value);
+    var user = this.appUserService.getUserByUserName(value, getSampleCorrelationId());
 
     // then
     final var foundUser = user.await().atMost(ONE_SEC);
@@ -76,11 +89,13 @@ class AppUserServiceTest {
   @DisplayName("Empty should be resolved when no user is found by userName")
   void getByUserNameReturnsEmptyWhenNotFound() {
     // give
+    when(cacheService.find(any())).thenReturn(Uni.createFrom().item(Optional.empty()));
+
     when(appUserRepo.findByUserName(Mockito.anyString())).thenReturn(Uni.createFrom().failure(
         NoResultException::new));
 
     // when
-    var user = this.appUserService.getUserByUserName("jhondoe");
+    var user = this.appUserService.getUserByUserName("jhondoe", getSampleCorrelationId());
 
     // then
     final var foundUser = user.await().atMost(ONE_SEC);
@@ -90,14 +105,17 @@ class AppUserServiceTest {
   @Test
   @DisplayName("A user should be resolved when its found by username")
   void getByUserNameReturnsReturnsAnUser() {
-    // give
+    // given
     var user = this.provideSampleUser();
 
+    when(cacheService.find(any())).thenReturn(Uni.createFrom().item(Optional.empty()));
+    when(cacheService.persist(any(CacheUserDTO.class))).thenReturn(Uni.createFrom().item(true));
     when(appUserRepo.findByUserName(Mockito.anyString())).thenReturn(Uni.createFrom().item(user));
 
     // when
     var foundUser =
-        this.appUserService.getUserByUserName(user.getUsername()).await().atMost(ONE_SEC).get();
+        this.appUserService.getUserByUserName(user.getUsername(), getSampleCorrelationId())
+            .await().atMost(ONE_SEC).get();
 
     // then
     assertThat(foundUser.getUsername(), is(user.getUsername()));
@@ -106,6 +124,31 @@ class AppUserServiceTest {
     assertThat(foundUser.getEmail(), is(user.getEmail()));
     assertThat(foundUser.getBiography(), nullValue());
     assertTrue(foundUser.isActive());
+  }
+
+  @Test
+  @DisplayName("A cached user should be returned when its found by username")
+  void getByUserNameReturnsReturnsCachedUser() {
+    // given
+    var user = this.provideSampleUser();
+    final var cache = appUserMapper.toCache(user);
+
+    when(cacheService.find(any())).thenReturn(Uni.createFrom().item(Optional.of(cache)));
+
+    // when
+    var foundUser =
+        this.appUserService.getUserByUserName(user.getUsername(), getSampleCorrelationId())
+            .await().atMost(ONE_SEC).get();
+
+    // then
+    assertThat(foundUser.getUsername(), is(user.getUsername()));
+    assertThat(foundUser.getFirstName(), is(user.getFirstName()));
+    assertThat(foundUser.getId(), is(user.getId()));
+    assertThat(foundUser.getEmail(), is(user.getEmail()));
+    assertThat(foundUser.getBiography(), nullValue());
+    assertTrue(foundUser.isActive());
+
+    verify(appUserRepo, never()).findByUserName(anyString());
   }
 
   @Test
@@ -130,7 +173,9 @@ class AppUserServiceTest {
     appUser.setUsername("  " + appUser.getUsername().toUpperCase() + "  ");
     appUser.setEmail("My.Email@AcMe.com");
     appUser.setActive(false);
-    appUser.setCreationDate(null);
+    appUser.setCreationDate(Instant.now());
+
+    when(cacheService.persist(any(CacheUserDTO.class))).thenReturn(Uni.createFrom().item(true));
 
     when(this.appUserRepo.findByUserNameOrEmail(anyString(), anyString()))
         .thenReturn(Uni.createFrom().item(Collections.emptyList()));
@@ -151,6 +196,29 @@ class AppUserServiceTest {
     assertThat(capturedUser.getEmail(), is(appUser.getEmail().toLowerCase().trim()));
     assertThat(capturedUser.getCreationDate(), notNullValue());
     assertTrue(capturedUser.isActive());
+  }
+
+  @Test
+  @DisplayName("Persisted User should be cached")
+  void persistUserShouldBeCached() {
+    // given
+    final var appUser = this.provideSampleUser();
+
+    when(cacheService.persist(any(CacheUserDTO.class))).thenReturn(Uni.createFrom().item(true));
+
+    when(this.appUserRepo.findByUserNameOrEmail(anyString(), anyString()))
+        .thenReturn(Uni.createFrom().item(Collections.emptyList()));
+
+    when(this.appUserRepo.persist(any(AppUser.class)))
+        .thenReturn(Uni.createFrom().item(appUser));
+
+    var correlationId = getSampleCorrelationId();
+
+    // when
+    this.appUserService.persistAppUser(appUser, correlationId).await().atMost(ONE_SEC);
+
+    // then
+    verify(this.cacheService,times(1)).persist(any(CacheUserDTO.class));
   }
 
   @RepeatedTest(value = 2, name = "A non-unique appUser should not be persisted")
@@ -192,6 +260,24 @@ class AppUserServiceTest {
     // then
     final var disabledUser = output.await().atMost(ONE_SEC);
     assertThat(disabledUser, is(Optional.empty()));
+  }
+
+  @Test
+  @DisplayName("Disable user should delete cached data")
+  void disableUserShouldDeleteCachedData() {
+    // given
+    var correlationId = getSampleCorrelationId();
+    var sampleUser = provideSampleUser();
+    sampleUser.setUsername("johndoe");
+
+    when(this.cacheService.remove(anyString())).thenReturn(Uni.createFrom().item(true));
+    when(this.appUserRepo.findByUserName(anyString())).thenReturn(Uni.createFrom().item(sampleUser));
+
+    // then
+    this.appUserService.disableUser("johndoe", correlationId).await().atMost(ONE_SEC);
+
+    // then
+    verify(this.cacheService,times(1)).remove(eq("johndoe"));
   }
 
   @ParameterizedTest
@@ -237,6 +323,7 @@ class AppUserServiceTest {
     var fiveDaysAgo = Instant.now().minus(5, ChronoUnit.DAYS);
     repoUser.setCreationDate(fiveDaysAgo);
 
+    when(cacheService.persist(any(CacheUserDTO.class))).thenReturn(Uni.createFrom().item(true));
     when(this.appUserRepo.findByUserName(anyString())).thenReturn(Uni.createFrom().item(repoUser));
     when(this.appUserRepo.findByUserNameOrEmail(anyString(), anyString()))
         .thenReturn(Uni.createFrom().item(List.of(repoUser)));
@@ -265,6 +352,28 @@ class AppUserServiceTest {
     assertThat(outputUser.getFirstName(), is(sampleUser.getFirstName()));
     assertThat(outputUser.getLastName(), is(sampleUser.getLastName()));
     assertThat(outputUser.getBiography(), is(sampleUser.getBiography()));
+  }
+
+  @Test
+  @DisplayName("Update user should cache updated data")
+  void updateUserShouldCacheItsResults() {
+    // given
+    var correlationId = getSampleCorrelationId();
+    var repoUser = provideSampleUser();
+    repoUser.setId(1000L);
+
+    when(this.appUserRepo.findByUserNameOrEmail(anyString(), anyString())).thenReturn(Uni.createFrom().item(List.of(repoUser)));
+    when(this.appUserRepo.findByUserName(anyString())).thenReturn(Uni.createFrom().item(repoUser));
+    when(this.cacheService.persist(any(CacheUserDTO.class))).thenReturn(Uni.createFrom().item(true));
+
+    var updateUser = repoUser.withLastName("NoName");
+
+    // when
+    var output = this.appUserService.updateAppUser(updateUser, correlationId)
+        .await().atMost(ONE_SEC);
+
+    // then
+    verify(this.cacheService,times(1)).persist(any(CacheUserDTO.class));
   }
 
   private AppUser provideSampleUser() {

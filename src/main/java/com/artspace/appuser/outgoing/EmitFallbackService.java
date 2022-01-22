@@ -76,7 +76,6 @@ class EmitFallbackService {
           .find("isprocessed", false)
           .firstResult()
           .map(Optional::ofNullable)
-          .onItem()
           .invoke(opt -> opt.ifPresent(FailedMessage::markAsProcessed));
     } catch (Exception e) {
       logger.error("Unable to process next failed message", e);

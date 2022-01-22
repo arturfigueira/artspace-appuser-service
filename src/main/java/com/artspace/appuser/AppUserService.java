@@ -1,9 +1,11 @@
 package com.artspace.appuser;
 
+import com.artspace.appuser.cache.CacheService;
 import com.artspace.appuser.outgoing.AppUserDTO;
 import com.artspace.appuser.outgoing.DataEmitter;
 import io.quarkus.hibernate.reactive.panache.common.runtime.ReactiveTransactional;
 import io.smallrye.mutiny.Uni;
+import io.smallrye.reactive.messaging.i18n.ProviderLogging;
 import java.util.HashSet;
 import java.util.Optional;
 import java.util.Set;
@@ -31,10 +33,16 @@ public class AppUserService {
 
   final DataEmitter<AppUserDTO> dataEmitter;
 
+  final CacheService cacheService;
+
+  final AppUserMapper appUserMapper;
+
   final Logger logger;
 
   /**
    * Searches for a {@link AppUser} by its unique identifier.
+   *
+   * <p>This method does not access any cache and goes directory to where the data is stored.
    *
    * @param id long value that represents the unique identifier of the required user
    * @return An {@link Uni} that will resolve into an Optional with found user or empty otherwise
@@ -55,7 +63,23 @@ public class AppUserService {
    * @return An {@link Uni} that will resolve into an Optional with found user or empty otherwise
    */
   @Transactional(TxType.SUPPORTS)
-  public Uni<Optional<AppUser>> getUserByUserName(String userName) {
+  public Uni<Optional<AppUser>> getUserByUserName(String userName, final String correlationId) {
+    return this.fromCache(userName, correlationId)
+        .chain(
+            optionalUser ->
+                optionalUser
+                    .map(u -> Uni.createFrom().item(optionalUser))
+                    .orElseGet(() -> retrieveAndCache(userName, correlationId)));
+  }
+
+  private Uni<Optional<AppUser>> retrieveAndCache(String userName, String correlationId) {
+    return this.getUserByUserNameFromDataBase(userName)
+        .invoke(
+            optionalAppUser ->
+                optionalAppUser.ifPresent(appUser -> this.cacheUser(appUser, correlationId)));
+  }
+
+  protected Uni<Optional<AppUser>> getUserByUserNameFromDataBase(String userName) {
     return Optional.ofNullable(userName)
         .filter(value -> !value.isBlank())
         .map(
@@ -69,12 +93,16 @@ public class AppUserService {
   }
 
   /**
-   * Disable a specific user by its username. If the user is already disable nothing will occur. At
-   * the end of the action the username of the user will be returned as proof that the action
-   * worked, an empty optional will be returned in case of a non-existent user.
+   * Disable a specific user by its username.
+   *
+   * <p>If the user is already disable nothing will occur. At the end of the action the username of
+   * the user will be returned as proof that the action worked, an empty optional will be returned
+   * in case of a non-existent user.
    *
    * <p>Disabling the user will also trigger a message emission to propagate this change to external
    * services that uses ser data
+   *
+   * <p>This will also clean any cached user data, if it exists
    *
    * @param userName Non-null, nor empty, username of the required User to be disabled
    * @param correlationId Trasnsit id to identify the request between services
@@ -82,17 +110,24 @@ public class AppUserService {
    *     an empty optional will be returned if no user was found
    */
   public Uni<Optional<String>> disableUser(String userName, final String correlationId) {
-    return this.getUserByUserName(userName)
+    return this.getUserByUserNameFromDataBase(userName)
         .invoke(appUser -> appUser.ifPresent(AppUser::toggleActive))
-        .onItem()
+        .invoke(
+            optionalAppUser ->
+                optionalAppUser.ifPresent(u -> this.clearCache(u.getUsername(), correlationId)))
         .invoke(
             userOptional -> userOptional.ifPresent(u -> this.broadcastChanges(u, correlationId)))
         .map(appUser -> appUser.map(AppUser::getUsername));
   }
 
   /**
-   * Permanently persist the given {@link AppUser} into the repository. This user must contain only
-   * valid attributes, according tho its schema. It must also contain a unique username and email.
+   * Permanently persist the given {@link AppUser} into the repository.
+   *
+   * <p>This user must contain only valid attributes, according tho its schema. It must also contain
+   * a unique username and email.
+   *
+   * <p>If successful this will broadcast an event indicating that a new user has been created. This
+   * will also cache this new user data for quicker access later.
    *
    * @param inputAppUser which is required to be persisted
    * @param correlationId Trasnsit id to identify the request between services
@@ -109,14 +144,21 @@ public class AppUserService {
         .chain(appUserRepo::persist)
         .invoke(
             entity -> logger.debugf("[%s] User successfully persisted: %s", correlationId, entity))
-        .onItem()
+        .invoke(u -> this.cacheUser(u, correlationId))
         .invoke(u -> this.broadcastChanges(u, correlationId));
   }
 
   /**
-   * Updates the given {@link AppUser}. Not all attributes will be updated. Id, username, creation
-   * date and isActive won't be updated via this method. The former three are constants, and It's
-   * important to not update them, as it is used by the entire application as a data bound.
+   * Updates the given {@link AppUser}.
+   *
+   * <p>Not all attributes will be updated. Id, username, creation date and isActive won't be
+   * updated via this method. The former three are constants, and It's important to not update them,
+   * as it is used by the entire application as a data bound.
+   *
+   * <p>Updates will ignore cached data, and will retrieve the current user state directly from its
+   * repository. If the update is successful, then the cache will be updated.
+   *
+   * <p>Also, an event will be broadcast to indicate that the given user was updated
    *
    * <p>Disable a appUser can be achieved with {@link #disableUser(String, String)}}}
    *
@@ -129,7 +171,7 @@ public class AppUserService {
    */
   public Uni<Optional<AppUser>> updateAppUser(
       final @Valid @NotNull AppUser inputAppUser, final String correlationId) {
-    return this.getUserByUserName(inputAppUser.getUsername())
+    return this.getUserByUserNameFromDataBase(inputAppUser.getUsername())
         .chain(
             userOptional ->
                 userOptional.isPresent()
@@ -141,9 +183,9 @@ public class AppUserService {
       final AppUser inputAppUser, final AppUser dbUser, final String correlationId) {
     return this.validateMailUniqueness(inputAppUser)
         .map(appUser -> updateAndFlush(appUser, dbUser))
-        .onItem()
-        .invoke(u -> broadcastChanges(u, correlationId))
         .invoke(u -> logger.debugf("[%s] User successfully updated: %s", correlationId, u))
+        .invoke(u -> cacheUser(u, correlationId))
+        .invoke(u -> broadcastChanges(u, correlationId))
         .map(Optional::of);
   }
 
@@ -167,6 +209,54 @@ public class AppUserService {
     storedUser.setBiography(inputAppUser.getBiography());
     this.appUserRepo.flush();
     return storedUser;
+  }
+
+  private void clearCache(String username, final String correlationId) {
+    this.cacheService
+        .remove(username)
+        .invoke(
+            aBoolean ->
+                logger.infof(
+                    "[%s] Caching del request finished. Result: %s", correlationId, aBoolean))
+        .onFailure()
+        .invoke(
+            e ->
+                logger.errorf(
+                    "[%s] A failure occurred, which prevented the caching cleaning. %s",
+                    correlationId, e))
+        .subscribe()
+        .with(x -> {}, ProviderLogging.log::failureEmittingMessage);
+  }
+
+  private Uni<Optional<AppUser>> fromCache(String username, final String correlationId) {
+    return this.cacheService
+        .find(username)
+        .map(result -> result.map(this.appUserMapper::toEntity))
+        .invoke(
+            optionalAppUser ->
+                optionalAppUser.ifPresentOrElse(
+                    appUser ->
+                        logger.infof("[%s] Found cached user for %s", correlationId, username),
+                    () ->
+                        logger.infof(
+                            "[%s] Not found a cached user for %s", correlationId, username)));
+  }
+
+  private void cacheUser(final AppUser appUser, final String correlationId) {
+    final var cacheUserDTO = this.appUserMapper.toCache(appUser);
+    this.cacheService
+        .persist(cacheUserDTO)
+        .invoke(
+            aBoolean ->
+                logger.infof(
+                    "[%s] Caching set request finished. Result: %s", correlationId, aBoolean))
+        .onFailure()
+        .invoke(
+            e ->
+                logger.errorf(
+                    "[%s] A failure occurred, which prevented the caching. %s", correlationId, e))
+        .subscribe()
+        .with(x -> {}, ProviderLogging.log::failureEmittingMessage);
   }
 
   private void broadcastChanges(final AppUser appUser, final String correlationId) {
