@@ -1,13 +1,12 @@
 package com.artspace.appuser.outgoing;
 
+import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import io.quarkus.hibernate.reactive.panache.common.runtime.ReactiveTransactional;
 import io.smallrye.faulttolerance.api.CircuitBreakerName;
 import io.smallrye.faulttolerance.api.FibonacciBackoff;
 import io.smallrye.mutiny.TimeoutException;
 import io.smallrye.mutiny.Uni;
-import io.smallrye.reactive.messaging.kafka.api.OutgoingKafkaRecordMetadata;
-import java.util.Iterator;
 import java.util.List;
 import java.util.Optional;
 import javax.enterprise.context.ApplicationScoped;
@@ -17,12 +16,10 @@ import javax.transaction.Transactional;
 import javax.transaction.Transactional.TxType;
 import lombok.AccessLevel;
 import lombok.Getter;
-import org.apache.kafka.common.header.Header;
 import org.eclipse.microprofile.config.inject.ConfigProperty;
 import org.eclipse.microprofile.faulttolerance.CircuitBreaker;
 import org.eclipse.microprofile.faulttolerance.Retry;
 import org.eclipse.microprofile.faulttolerance.Timeout;
-import org.eclipse.microprofile.reactive.messaging.Message;
 import org.jboss.logging.Logger;
 
 @ReactiveTransactional
@@ -83,14 +80,7 @@ class EmitFallbackService {
     }
   }
 
-  /**
-   * Register a new failure message for given message and error
-   * @param message Original message that was not acknowledged
-   * @param error Reason for not being acknowledged
-   * @return {@code Uni} void
-   * @throws TimeoutException if this method reaches its maximum processing time
-   */
-  public Uni<Void> registerFailure(final Message<AppUserDTO> message, final Throwable error) {
+  public Uni<Void> registerFailure(final String correlationId, final AppUserDTO input) {
     var result =
         Uni.createFrom()
             .voidItem()
@@ -98,59 +88,46 @@ class EmitFallbackService {
 
     if (enabledRegistering) {
       result =
-          this.innerRegister(message, error)
+          this.innerRegister(correlationId, input)
               .onFailure()
               .invoke(e -> logger.error("Unable to register failed message", e));
     }
     return result;
   }
 
-
-  @Timeout(value = 500)
-  @CircuitBreaker(requestVolumeThreshold = 6, failureRatio = 0.75, delay = 2000L)
+  @Timeout()
+  @CircuitBreaker(
+      requestVolumeThreshold = 10,
+      failureRatio = 0.75,
+      delay = 1000L,
+      skipOn = {IllegalArgumentException.class, JsonProcessingException.class})
   @CircuitBreakerName("message-failure-register")
-  @Retry(maxRetries = 5, delay = 200)
+  @Retry(maxRetries = 5, delay = 200, abortOn = {IllegalArgumentException.class, JsonProcessingException.class})
   @FibonacciBackoff
-  protected Uni<Void> innerRegister(final Message<AppUserDTO> message, final Throwable error) {
+  protected Uni<Void> innerRegister(final String correlationId, final AppUserDTO input) {
     try {
-      if (message == null) {
-        logger.warn("No message provided to be registered as failure. Ignoring");
-        return Uni.createFrom().voidItem();
-      }
+      final var corid = Optional.ofNullable(correlationId)
+          .filter(s->!s.isBlank())
+          .orElseThrow(() -> new IllegalArgumentException("Invalid correlationId"));
 
-      var correlationId = this.extractCorrelation(message);
-      final var valueAsString = this.objectMapper.writeValueAsString(message.getPayload());
+      final var appUser = Optional.ofNullable(input)
+          .orElseThrow(() -> new IllegalArgumentException("Invalid input user"));
+
+      final var valueAsString = this.objectMapper.writeValueAsString(appUser);
       final var failedMessage =
           FailedMessage.builder()
-              .correlationId(correlationId)
+              .correlationId(corid)
               .serializedPayload(valueAsString)
               .build();
-
-      Optional.ofNullable(error).map(Throwable::getMessage).ifPresent(failedMessage::setReason);
 
       return this.failureRepository
           .persist(failedMessage)
           .invoke(msg -> logger.debugf("Message registered for further analysis. %s", msg))
           .replaceWithVoid();
+
     } catch (Exception e) {
       logger.error("Unable to register failed message", e);
       return Uni.createFrom().failure(e);
     }
-  }
-
-  private String extractCorrelation(Message<AppUserDTO> message) {
-    final var kafkaRecordMetadata = message.getMetadata(OutgoingKafkaRecordMetadata.class);
-
-    final var headerIterator =
-        kafkaRecordMetadata.map(
-            metadata -> metadata.getHeaders().headers(this.correlationKey).iterator());
-
-    return headerIterator.isPresent() && headerIterator.get().hasNext()
-        ? extractHeaderValue(headerIterator.get())
-        : null;
-  }
-
-  private String extractHeaderValue(Iterator<Header> headerIterator) {
-    return new String(headerIterator.next().value());
   }
 }

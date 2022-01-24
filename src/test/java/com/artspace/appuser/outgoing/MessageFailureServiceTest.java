@@ -3,17 +3,16 @@ package com.artspace.appuser.outgoing;
 import static io.smallrye.common.constraint.Assert.assertTrue;
 import static org.hamcrest.CoreMatchers.notNullValue;
 import static org.hamcrest.MatcherAssert.assertThat;
+import static org.hamcrest.Matchers.nullValue;
 
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.github.javafaker.Faker;
 import io.quarkus.test.junit.QuarkusTest;
-import io.smallrye.reactive.messaging.kafka.OutgoingKafkaRecord;
 import java.time.Duration;
 import java.util.Locale;
 import java.util.UUID;
 import javax.inject.Inject;
-import org.eclipse.microprofile.reactive.messaging.Message;
 import org.hamcrest.core.Is;
 import org.jboss.logging.Logger;
 import org.junit.jupiter.api.AfterEach;
@@ -55,11 +54,11 @@ class MessageFailureServiceTest {
   void registerFailureShouldPersistIntoRepository() throws JsonProcessingException {
     // given
     final var appUserDTO = provideSampleUser();
-    final var message = messageOf(appUserDTO);
+    final var correlationId = provideCorrelationId();
 
     // when
     this.emitFallbackService
-        .registerFailure(message, new IllegalStateException("Mocked Error"))
+        .registerFailure(correlationId, appUserDTO)
         .await()
         .atMost(ONE_SECOND);
 
@@ -69,7 +68,7 @@ class MessageFailureServiceTest {
     assertThat(failedMessages.size(), Is.is(1));
 
     final var failedMessage = failedMessages.get(0);
-    assertThat(failedMessage.getReason(), Is.is("Mocked Error"));
+    assertThat(failedMessage.getReason(), nullValue());
     assertThat(failedMessage.getFailedTime(), notNullValue());
     assertThat(failedMessage.getId(), notNullValue());
 
@@ -86,10 +85,8 @@ class MessageFailureServiceTest {
     // given
     for (var index = 0; index <= 5; index++) {
       final var appUserDTO = provideSampleUser();
-      final var message = messageOf(appUserDTO);
-
-      this.emitFallbackService.registerFailure(
-          message, new IllegalStateException("Mocked Error " + index)).await().atMost(ONE_SECOND);
+      this.emitFallbackService.registerFailure(provideCorrelationId(), appUserDTO)
+          .await().atMost(ONE_SECOND);
     }
 
     // when
@@ -108,9 +105,8 @@ class MessageFailureServiceTest {
     assertTrue(updatedMessage.get().isProcessed());
   }
 
-  private Message<AppUserDTO> messageOf(final AppUserDTO appUserDTO) {
-    return OutgoingKafkaRecord.from(Message.of(appUserDTO))
-        .withHeader("correlationId", UUID.randomUUID().toString().getBytes());
+  private String provideCorrelationId() {
+    return UUID.randomUUID().toString();
   }
 
   private AppUserDTO provideSampleUser() {

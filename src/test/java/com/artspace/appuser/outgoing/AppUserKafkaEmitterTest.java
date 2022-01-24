@@ -4,6 +4,7 @@ import static org.hamcrest.MatcherAssert.assertThat;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.Mockito.doAnswer;
 import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
@@ -118,7 +119,7 @@ class AppUserKafkaEmitterTest {
     // given
     final var appUserDTO = generateSampleUser();
 
-    when(fallbackService.registerFailure(any(Message.class), any(Throwable.class)))
+    when(fallbackService.registerFailure(anyString(), any(AppUserDTO.class)))
         .thenReturn(Uni.createFrom().voidItem());
 
     final var messageNackRunnable = new AtomicReference<CompletionStage<Void>>(null);
@@ -137,7 +138,7 @@ class AppUserKafkaEmitterTest {
     // then
     giveBreathForTheThreadToFinish();
     verify(fallbackService, times(1))
-        .registerFailure(any(Message.class), any(IllegalStateException.class));
+        .registerFailure(anyString(), any(AppUserDTO.class));
   }
 
   /**

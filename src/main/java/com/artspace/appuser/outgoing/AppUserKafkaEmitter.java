@@ -1,5 +1,7 @@
 package com.artspace.appuser.outgoing;
 
+import io.smallrye.faulttolerance.api.CircuitBreakerName;
+import io.smallrye.faulttolerance.api.FibonacciBackoff;
 import io.smallrye.reactive.messaging.MutinyEmitter;
 import io.smallrye.reactive.messaging.i18n.ProviderLogging;
 import io.smallrye.reactive.messaging.kafka.OutgoingKafkaRecord;
@@ -11,6 +13,11 @@ import javax.inject.Inject;
 import lombok.AccessLevel;
 import lombok.Getter;
 import org.eclipse.microprofile.config.inject.ConfigProperty;
+import org.eclipse.microprofile.faulttolerance.Bulkhead;
+import org.eclipse.microprofile.faulttolerance.CircuitBreaker;
+import org.eclipse.microprofile.faulttolerance.Fallback;
+import org.eclipse.microprofile.faulttolerance.Retry;
+import org.eclipse.microprofile.faulttolerance.Timeout;
 import org.eclipse.microprofile.reactive.messaging.Channel;
 import org.eclipse.microprofile.reactive.messaging.Message;
 import org.eclipse.microprofile.reactive.messaging.OnOverflow;
@@ -46,13 +53,24 @@ class AppUserKafkaEmitter implements DataEmitter<AppUserDTO> {
   /**
    * {@inheritDoc}
    *
-   * <p>Not acknowledged messages will be stored with a fallback service, to
-   * retry it later on.
+   * <p>Not acknowledged messages will be stored with a fallback service, to retry it later on.
    *
    * @param correlationId identifier of the transaction that originated this necessity of emission
    * @param input data to be emitted
    * @throws IllegalArgumentException if correlationId is null or blank or input is null
    */
+  @Timeout()
+  @CircuitBreaker(
+      requestVolumeThreshold = 10,
+      delay = 500L,
+      skipOn = {IllegalArgumentException.class})
+  @Retry(
+      maxRetries = 5,
+      delay = 200,
+      abortOn = {IllegalArgumentException.class})
+  @FibonacciBackoff
+  @Bulkhead()
+  @Fallback(fallbackMethod = "registerLocally")
   @Override
   public void emit(final String correlationId, final AppUserDTO input) {
     final var corId =
@@ -66,11 +84,7 @@ class AppUserKafkaEmitter implements DataEmitter<AppUserDTO> {
             .map(user -> messageOf(user, corId))
             .orElseThrow(() -> new IllegalArgumentException("Emit AppUser can not be null"));
 
-    try {
-      emitter.send(message);
-    } catch (IllegalStateException e) {
-      handleFailure(input, e, corId);
-    }
+    emitter.send(message);
   }
 
   private Message<AppUserDTO> messageOf(final AppUserDTO appUserDTO, String correlationId) {
@@ -78,16 +92,12 @@ class AppUserKafkaEmitter implements DataEmitter<AppUserDTO> {
     return OutgoingKafkaRecord.from(message)
         .withHeader(correlationKey, correlationId.getBytes())
         .withAck(() -> handleAck(correlationId, appUserDTO))
-        .withNack(throwable -> handleNack(message, throwable));
-  }
-
-  private void handleFailure(final AppUserDTO input, final Throwable e, String correlationId) {
-    logger.errorf("[%] Failed to send %s to the broker. %s", correlationId, input, e);
+        .withNack(throwable -> handleNack(correlationId, appUserDTO, throwable));
   }
 
   private CompletableFuture<Void> handleNack(
-      final Message<AppUserDTO> message, final Throwable throwable) {
-    return CompletableFuture.runAsync(getFailureRunnable(message, throwable));
+      String correlationId, final AppUserDTO appUserDTO, final Throwable throwable) {
+    return CompletableFuture.runAsync(getFailureRunnable(correlationId, appUserDTO, throwable));
   }
 
   private CompletionStage<Void> handleAck(String correlationId, final AppUserDTO appUserDTO) {
@@ -99,12 +109,20 @@ class AppUserKafkaEmitter implements DataEmitter<AppUserDTO> {
         logger.infof("[%s] Sent %s was acknowledged by the broker", correlationId, appUserDTO);
   }
 
+  private void registerLocally(final String correlationId, final AppUserDTO input) {
+    fallbackService
+        .registerFailure(correlationId, input)
+        .subscribe()
+        .with(x -> {}, ProviderLogging.log::failureEmittingMessage);
+  }
+
   private Runnable getFailureRunnable(
-      final Message<AppUserDTO> message, final Throwable throwable) {
+      String correlationId, final AppUserDTO appUserDTO, final Throwable throwable) {
     return () -> {
-      logger.errorf("Sent message was NOT acknowledged by the broker. %s", throwable);
+      logger.errorf(
+          "[%s] Sent message was NOT acknowledged by the broker. %s", correlationId, throwable);
       fallbackService
-          .registerFailure(message, throwable)
+          .registerFailure(correlationId, appUserDTO)
           .subscribe()
           .with(x -> {}, ProviderLogging.log::failureEmittingMessage);
     };
